@@ -9,7 +9,7 @@
 ## ✨ 核心特性
 
 - 🤖 **智能对话** - LangChain 多轮对话 + 流式输出
-- 📚 **RAG 问答** - 向量检索增强，支持文档上传、自动建立向量索引、自动更新知识库
+- 📚 **RAG 问答** - 向量检索增强，支持文档上传、自动建立向量索引、OpenAI 兼容 / NVIDIA Rerank 重排序
 - 🔧 **AIOps 诊断** - Plan-Execute-Replan 自动故障诊断和根因分析
 - 🌐 **Web 界面** - 现代化 UI，支持多种对话模式：快速问答/流式对话
 - 🔌 **MCP 集成** - 日志查询和监控数据工具接入
@@ -17,15 +17,15 @@
 ## 🛠️ 技术栈
 
 - **框架**: FastAPI + LangChain + LangGraph
-- **LLM**: 阿里云 DashScope (通义千问)
+- **LLM**: OpenAI 兼容接口（可接入 DashScope、OpenAI 或其他兼容服务）
 - **向量库**: Milvus
 - **工具协议**: MCP (Model Context Protocol)
 
 ## 🚀 快速开始
 
 ### 环境要求
-- Python 3.10+
-- 阿里云 DashScope API Key ([获取地址](https://dashscope.aliyun.com/))
+- Python 3.11、3.12 或 3.13
+- Chat、Embedding、Rerank 所需的模型服务 API Key（可使用 OpenAI 兼容接口）
 
 ### 安装和启动
 
@@ -47,7 +47,7 @@ uv pip install -e .
 pip install -e .
 
 # 3. 编辑配置文件
-# 首次使用需要编辑 .env 文件，填入你的 DASHSCOPE_API_KEY
+# 首次使用需要编辑 .env 文件，填入 Chat、Embedding、Rerank 对应的 API Key 和 Base URL
 vim .env  # 或使用其他编辑器
 
 # 4. 一键初始化（启动 Docker + 服务 + 上传文档）
@@ -67,22 +67,17 @@ git clone <repository_url>
 cd super_biz_agent_py
 
 # 2. 创建虚拟环境并安装依赖
-# 方式 1: 使用 uv（推荐，更快）
-pip install uv
-# 创建虚拟环境
-uv venv
-# 激活虚拟环境
-.venv\Scripts\activate
-# 安装所有依赖
-uv pip install -e .
-
-# 方式 2: 使用 pip
 python -m venv .venv
-.venv\Scripts\activate
-pip install -e .
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e .
+
+# 可选：使用 uv 同步依赖
+python -m pip install uv
+python -m uv sync
 
 # 3. 编辑配置文件
-# 使用记事本或其他编辑器打开 .env 文件，填入你的 DASHSCOPE_API_KEY
+# 使用记事本或其他编辑器打开 .env 文件，填入 Chat、Embedding、Rerank 对应的 API Key 和 Base URL
 notepad .env
 
 # 4. 启动 Docker Desktop
@@ -121,6 +116,14 @@ python -c "import requests, os, time; [requests.post('http://localhost:9900/api/
 
 # 停止所有服务
 .\stop-windows.bat
+```
+
+说明：Windows 批处理脚本已使用英文 ASCII 输出，避免 `cmd.exe` 在不同代码页下把中文 UTF-8 内容解析成乱码命令。启动脚本会打开 `SuperBizAgent Logs` 窗口实时跟随 `server.log`，并在启动完成时打印最近的 FastAPI 日志。
+
+如需手动查看实时日志：
+
+```powershell
+powershell -NoProfile -Command "Get-Content -Path server.log -Wait -Tail 80 -Encoding UTF8"
 ```
 
 ### 访问服务
@@ -177,9 +180,12 @@ super_biz_agent_py/
 │   ├── services/                           # 业务服务层
 │   │   ├── __init__.py
 │   │   ├── rag_agent_service.py            # RAG Agent（LangGraph 状态图）
+│   │   ├── rag_retrieval_service.py        # RAG 检索流水线（候选召回 + 重排序）
+│   │   ├── rerank_service.py               # OpenAI 兼容 / NVIDIA Rerank 服务与本地降级策略
 │   │   ├── aiops_service.py                # AIOps 服务（计划-执行-重规划）
 │   │   ├── vector_store_manager.py         # 向量存储管理器
-│   │   ├── vector_embedding_service.py     # 向量embedding服务
+│   │   ├── vector_embedding_service.py     # OpenAI 兼容向量 embedding 服务
+│   │   ├── embedding_input_guard.py        # 检索 query 压缩与 token 预算估算
 │   │   ├── vector_index_service.py         # 向量索引服务
 │   │   ├── vector_search_service.py        # 向量检索服务
 │   │   └── document_splitter_service.py    # 文档分割服务
@@ -239,11 +245,19 @@ super_biz_agent_py/
 通过 `.env` 文件配置：
 
 ```bash
-# 阿里云LLM DashScope 配置（必填）
-# 秘钥管理： https://bailian.console.aliyun.com/cn-beijing/?spm=5176.29597918.J_SEsSjsNv72yRuRFS2VknO.2.61ac133ccTVQLw&tab=demohouse#/api-key
-DASHSCOPE_API_KEY=your-api-key （配置你自己的秘钥）
-DASHSCOPE_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1  # 不配置则默认会使用新加坡站点
-DASHSCOPE_MODEL=qwen-max
+# Chat LLM 配置
+CHAT_API_KEY=your-chat-api-key
+CHAT_BASE_URL=https://your-chat-provider.example.com/v1
+CHAT_MODEL=your-chat-model
+
+# Embedding 配置
+EMBEDDING_API_KEY=your-embedding-api-key
+EMBEDDING_BASE_URL=https://your-embedding-provider.example.com/v1
+EMBEDDING_MODEL=your-embedding-model
+EMBEDDING_DIMENSIONS=1024
+EMBEDDING_ENCODING_FORMAT=float
+EMBEDDING_MAX_TOKENS=512
+EMBEDDING_TOKEN_SAFETY_MARGIN=32
 
 # Milvus 配置
 MILVUS_HOST=localhost
@@ -251,9 +265,18 @@ MILVUS_PORT=19530
 
 # RAG 配置
 RAG_TOP_K=3
+RAG_CANDIDATE_TOP_K=20
+RERANK_ENABLED=true
+RERANK_PROVIDER=openai_compatible
+RERANK_API_KEY=your-rerank-api-key
+RERANK_BASE_URL=https://your-rerank-provider.example.com/v1
+RERANK_MODEL=BAAI/bge-reranker-v2-m3
+RERANK_TIMEOUT_SECONDS=30
 CHUNK_MAX_SIZE=800
 CHUNK_OVERLAP=100
 ```
+
+模型配置按 Chat、Embedding、Rerank 三组独立读取。`CHAT_*`、`EMBEDDING_*`、`RERANK_*` 优先级最高；未配置时会兼容旧的 `DASHSCOPE_*` 和 `NVIDIA_*` 变量。Embedding 输入会按 `EMBEDDING_MAX_TOKENS - EMBEDDING_TOKEN_SAFETY_MARGIN` 控制预算：用户检索 query 过长时会优先保留服务名、告警、错误码、状态码等高信号信息，再用尾部截断兜底；知识库文档入库时不会智能压缩或截断原文，而是在文档分割阶段继续切成更小分片，避免服务商返回 `input must have less than 512 tokens`。使用 NVIDIA API Catalog 托管服务时，`RERANK_PROVIDER=nvidia`，代码会自动将 `https://integrate.api.nvidia.com` 映射到 `https://ai.api.nvidia.com/v1/retrieval/{model}/reranking`；如果使用自部署 NeMo Retriever Reranking NIM，也可以直接配置完整的 `/v1/ranking` 或 `/v1/retrieval/{model}/reranking` 地址。
 
 ## 🎯 AIOps 智能运维
 
@@ -338,7 +361,10 @@ cmd
 .\start-windows.bat
 ```
 
-#### 3. 端口被占用（Windows）
+#### 3. 批处理脚本出现 `鍔?...` 乱码命令
+请更新到当前版本的 `start-windows.bat` / `stop-windows.bat`。脚本内容应为英文 ASCII，并使用 Windows CRLF 换行，避免 `cmd.exe` 代码页解析失败。
+
+#### 4. 端口被占用（Windows）
 ```powershell
 # 查看占用端口的进程
 netstat -ano | findstr :9900
@@ -352,8 +378,8 @@ taskkill /F /PID <PID>
 ### API Key 错误
 ```bash
 # 检查环境变量
-cat .env | grep DASHSCOPE_API_KEY    # Linux/macOS
-type .env | findstr DASHSCOPE_API_KEY  # Windows
+cat .env | grep API_KEY        # Linux/macOS
+type .env | findstr API_KEY    # Windows
 ```
 
 ### Milvus 连接失败
@@ -407,6 +433,7 @@ netstat -ano | findstr :8004  # Monitor MCP
 - [FastAPI 文档](https://fastapi.tiangolo.com/)
 - [LangChain 文档](https://python.langchain.com/)
 - [LangGraph Plan-Execute](https://langchain-ai.github.io/langgraph/tutorials/plan-and-execute/)
+- [OpenAI API](https://platform.openai.com/docs/api-reference)
 - [阿里云 DashScope](https://dashscope.aliyun.com/)
 - [MCP 协议](https://modelcontextprotocol.io/)
 

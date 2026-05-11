@@ -21,24 +21,24 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时执行
     logger.info("=" * 60)
-    logger.info(f"🚀 {config.app_name} v{config.app_version} 启动中...")
-    logger.info(f"📝 环境: {'开发' if config.debug else '生产'}")
-    logger.info(f"🌐 监听地址: http://{config.host}:{config.port}")
-    logger.info(f"📚 API 文档: http://{config.host}:{config.port}/docs")
+    logger.info(f"[启动] {config.app_name} v{config.app_version} 启动中...")
+    logger.info(f"[环境] {'开发' if config.debug else '生产'}")
+    logger.info(f"[服务地址] http://{config.host}:{config.port}")
+    logger.info(f"[API 文档] http://{config.host}:{config.port}/docs")
     
     # 连接 Milvus
-    logger.info("🔌 正在连接 Milvus...")
+    logger.info("[Milvus] 正在连接...")
     milvus_manager.connect()
-    logger.info("✅ Milvus 连接成功")
+    logger.info("[Milvus] 连接成功")
     
     logger.info("=" * 60)
     
     yield
     
     # 关闭时执行
-    logger.info("🔌 正在关闭 Milvus 连接...")
+    logger.info("[Milvus] 正在关闭连接...")
     milvus_manager.close()
-    logger.info(f"👋 {config.app_name} 关闭")
+    logger.info(f"[关闭] {config.app_name} 已关闭")
 
 
 # 创建 FastAPI 应用

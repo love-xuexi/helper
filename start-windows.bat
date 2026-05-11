@@ -1,174 +1,209 @@
 @echo off
-chcp 65001 >nul
-setlocal enabledelayedexpansion
+setlocal EnableExtensions EnableDelayedExpansion
+pushd "%~dp0" >nul
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
 
 echo ====================================
-echo 启动 SuperBizAgent 服务
+echo Starting SuperBizAgent services
 echo ====================================
 echo.
 
-REM 检查 uv 是否安装（可选，如果没有会使用 pip）
-echo [1/6] 检查包管理器...
+echo [1/9] Checking package manager...
 where uv >nul 2>&1
 if errorlevel 1 (
-    echo [信息] uv 未安装，将使用传统 pip 方式
-    echo [提示] 安装 uv 可提升速度：pip install uv
-    set USE_UV=0
+    echo [INFO] uv.exe was not found. pip fallback will be used.
+    echo [TIP] Optional install: python -m pip install uv
+    set "USE_UV=0"
 ) else (
-    echo [成功] 检测到 uv 包管理器
-    set USE_UV=1
+    echo [OK] uv.exe found.
+    set "USE_UV=1"
 )
 echo.
 
-REM 确保 Python 版本正确
-echo [2/6] 配置 Python 版本...
-if exist .python-version (
-    set /p PYTHON_VERSION=<.python-version
-    echo [信息] 当前配置版本: !PYTHON_VERSION!
-    
-    REM 检查是否为 3.10（不兼容）
-    echo !PYTHON_VERSION! | findstr /C:"3.10" >nul
-    if not errorlevel 1 (
-        echo [警告] Python 3.10 不兼容，自动更新到 3.13...
-        echo 3.13> .python-version
-        echo [成功] 已更新到 Python 3.13
-    )
+echo [2/9] Checking .python-version...
+set "PYTHON_VERSION="
+if exist ".python-version" (
+    set /p PYTHON_VERSION=<".python-version"
+)
+if "!PYTHON_VERSION!"=="" (
+    >".python-version" echo 3.13
+    set "PYTHON_VERSION=3.13"
+    echo [INFO] .python-version was empty and has been reset to 3.13.
 ) else (
-    echo [信息] 创建 .python-version 文件...
-    echo 3.13> .python-version
+    echo [INFO] .python-version: !PYTHON_VERSION!
 )
 echo.
 
-REM 创建或同步虚拟环境
-echo [3/6] 创建/同步虚拟环境...
-if exist .venv\Scripts\python.exe (
-    echo [信息] 虚拟环境已存在，检查更新...
-    
-    REM 如果有 uv，尝试使用 uv sync
+echo [3/9] Creating or updating virtual environment...
+if not exist ".venv\Scripts\python.exe" (
+    echo [INFO] Creating a new virtual environment...
     if "%USE_UV%"=="1" (
-        uv sync 2>nul
-        if errorlevel 1 (
-            echo [警告] uv sync 失败，使用 pip 更新...
-            .venv\Scripts\python.exe -m pip install -e . -q
-        ) else (
-            echo [成功] 使用 uv 同步完成
-        )
-    ) else (
-        echo [信息] 使用 pip 更新依赖...
-        .venv\Scripts\python.exe -m pip install -e . -q
+        echo [INFO] Trying uv sync...
+        uv sync
+        if not errorlevel 1 goto :venv_ready
+        echo [WARN] uv sync failed. Falling back to python -m venv.
     )
-) else (
-    echo [信息] 创建新的虚拟环境...
-    
-    REM 如果有 uv，尝试使用 uv sync
-    if "%USE_UV%"=="1" (
-        echo [信息] 尝试使用 uv sync 创建...
-        uv sync 2>nul
-        if not errorlevel 1 (
-            echo [成功] 使用 uv 创建完成
-            goto :venv_created
-        )
-        echo [警告] uv sync 失败，回退到传统方式...
+
+    where python >nul 2>&1
+    if errorlevel 1 (
+        echo [ERROR] Python was not found in PATH.
+        echo [TIP] Install Python 3.11, 3.12, or 3.13 and try again.
+        goto :fail
     )
-    
-    REM 使用传统 Python venv 创建
-    echo [信息] 使用 python -m venv 创建...
+
     python -m venv .venv
     if errorlevel 1 (
-        echo [错误] 虚拟环境创建失败
-        echo [提示] 请确保已安装 Python 3.11+
-        pause
-        exit /b 1
+        echo [ERROR] Virtual environment creation failed.
+        echo [TIP] Make sure Python 3.11, 3.12, or 3.13 is installed.
+        goto :fail
     )
-    
-    REM 安装依赖
-    echo [信息] 安装项目依赖（这可能需要几分钟）...
-    .venv\Scripts\python.exe -m pip install --upgrade pip -q
-    .venv\Scripts\python.exe -m pip install -e . -q
-    if errorlevel 1 (
-        echo [错误] 依赖安装失败
-        pause
-        exit /b 1
-    )
-    echo [成功] 虚拟环境创建完成
 )
 
-:venv_created
-echo [成功] 虚拟环境就绪
+:venv_ready
+set "PYTHON_CMD=.venv\Scripts\python.exe"
+if not exist "%PYTHON_CMD%" (
+    echo [ERROR] %PYTHON_CMD% was not created.
+    goto :fail
+)
+echo [OK] Virtual environment is available.
 echo.
 
-REM 设置 Python 命令
-set PYTHON_CMD=.venv\Scripts\python.exe
+echo [4/9] Checking virtual environment Python version...
+"%PYTHON_CMD%" -c "import sys; raise SystemExit(0 if (3, 11) <= sys.version_info[:2] < (3, 14) else 1)"
+if errorlevel 1 (
+    echo [ERROR] This project requires Python 3.11, 3.12, or 3.13.
+    "%PYTHON_CMD%" --version
+    echo [TIP] Recreate .venv with a supported Python version.
+    goto :fail
+)
+"%PYTHON_CMD%" --version
+echo.
 
-REM 启动 Docker Compose
-echo [4/6] 启动 Milvus 向量数据库...
-docker ps --format "{{.Names}}" | findstr "milvus-standalone" >nul 2>&1
+echo [5/9] Installing or updating dependencies...
+"%PYTHON_CMD%" -m pip --version >nul 2>&1
+if errorlevel 1 (
+    echo [INFO] pip was not found in the virtual environment. Bootstrapping pip...
+    "%PYTHON_CMD%" -m ensurepip --upgrade
+    if errorlevel 1 (
+        echo [ERROR] pip bootstrap failed.
+        echo [TIP] Delete .venv and run start-windows.bat again, or reinstall Python with pip support.
+        goto :fail
+    )
+)
+if "%USE_UV%"=="1" (
+    uv sync
+    if errorlevel 1 (
+        echo [WARN] uv sync failed. Falling back to pip.
+        "%PYTHON_CMD%" -m pip install -e .
+    )
+) else (
+    "%PYTHON_CMD%" -m pip install -e .
+)
+if errorlevel 1 (
+    echo [ERROR] Dependency installation failed.
+    goto :fail
+)
+echo [OK] Dependencies are ready.
+echo.
+
+echo [6/9] Checking application configuration...
+"%PYTHON_CMD%" -c "from app.config import config; print('Config OK')"
+if errorlevel 1 (
+    echo [ERROR] Application configuration check failed.
+    echo [TIP] Check .env values. DEBUG must be true or false.
+    goto :fail
+)
+echo.
+
+echo [7/9] Starting Milvus vector database...
+where docker >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Docker was not found in PATH.
+    echo [TIP] Install and start Docker Desktop first.
+    goto :fail
+)
+docker ps --format "{{.Names}}" | findstr /C:"milvus-standalone" >nul 2>&1
 if not errorlevel 1 (
-    echo [信息] Milvus 容器已在运行
+    echo [INFO] Milvus is already running.
 ) else (
     docker compose -f vector-database.yml up -d
     if errorlevel 1 (
-        echo [错误] Docker 启动失败，请确保 Docker Desktop 已启动
-        pause
-        exit /b 1
+        echo [ERROR] Docker Compose startup failed.
+        echo [TIP] Make sure Docker Desktop is running.
+        goto :fail
     )
-    echo [信息] 等待 Milvus 启动（10秒）...
+    echo [INFO] Waiting for Milvus startup...
     timeout /t 10 /nobreak >nul
 )
-echo [成功] Milvus 数据库就绪
+echo [OK] Milvus is ready.
 echo.
 
-REM 启动 CLS MCP 服务
-echo [5/6] 启动 CLS MCP 服务...
-start "CLS MCP Server" /min %PYTHON_CMD% mcp_servers/cls_server.py
+echo [8/9] Starting MCP services...
+start "CLS MCP Server" /min cmd /c ""%PYTHON_CMD%" "mcp_servers\cls_server.py" > "mcp_cls.log" 2>&1"
 timeout /t 2 /nobreak >nul
-echo [成功] CLS MCP 服务已启动
-echo.
-
-REM 启动 Monitor MCP 服务
-echo [6/6] 启动 Monitor MCP 服务...
-start "Monitor MCP Server" /min %PYTHON_CMD% mcp_servers/monitor_server.py
+start "Monitor MCP Server" /min cmd /c ""%PYTHON_CMD%" "mcp_servers\monitor_server.py" > "mcp_monitor.log" 2>&1"
 timeout /t 2 /nobreak >nul
-echo [成功] Monitor MCP 服务已启动
+echo [OK] MCP startup commands were sent.
 echo.
 
-REM 启动 FastAPI 服务
-echo [7/8] 启动 FastAPI 服务...
-start "SuperBizAgent API" %PYTHON_CMD% -m uvicorn app.main:app --host 0.0.0.0 --port 9900
-echo [信息] 等待服务启动（15秒）...
+echo [9/9] Starting FastAPI service...
+type nul > "server.log"
+start "SuperBizAgent API" cmd /c ""%PYTHON_CMD%" -m uvicorn app.main:app --host 0.0.0.0 --port 9900 > "server.log" 2>&1"
+timeout /t 2 /nobreak >nul
+start "SuperBizAgent Logs" powershell -NoProfile -ExecutionPolicy Bypass -NoExit -Command "$Host.UI.RawUI.WindowTitle='SuperBizAgent Logs'; Get-Content -Path 'server.log' -Wait -Tail 80 -Encoding UTF8"
+echo [INFO] Waiting for API startup...
 timeout /t 15 /nobreak >nul
-echo.
 
-REM 检查服务状态并上传文档
-echo.
-echo [信息] 检查服务状态...
+echo [INFO] Checking API health...
 curl -s http://localhost:9900/health >nul 2>&1
 if errorlevel 1 (
-    echo [警告] 服务可能还未完全启动，请稍等片刻
+    echo [WARN] API did not respond yet. Check server.log and logs\app_*.log.
 ) else (
-    echo [成功] FastAPI 服务运行正常
-    echo.
-    
-    REM 调用 API 上传 aiops-docs 文档到向量数据库
-    echo [8/8] 上传文档到向量数据库...
+    echo [OK] FastAPI is healthy.
+    echo [INFO] Uploading aiops-docs files...
     for %%f in (aiops-docs\*.md) do (
-        echo   上传: %%~nxf
+        echo   Uploading: %%~nxf
         curl -s -X POST http://localhost:9900/api/upload -F "file=@%%f" >nul 2>&1
     )
-    echo [成功] 文档上传完成
+    echo [OK] Document upload finished.
+)
+
+echo.
+echo [INFO] Recent FastAPI logs:
+if exist "server.log" (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -Path 'server.log' -Tail 30 -Encoding UTF8"
+) else (
+    echo [WARN] server.log was not created.
 )
 
 echo.
 echo ====================================
-echo 服务启动完成！
+echo Startup finished.
 echo ====================================
-echo Web 界面: http://localhost:9900
-echo API 文档: http://localhost:9900/docs
+echo Web UI: http://localhost:9900
+echo API docs: http://localhost:9900/docs
 echo.
-echo 查看日志:
-echo   - FastAPI: logs\app_*.log（Loguru 日志，按天轮转）
-echo   - CLS MCP: type mcp_cls.log
-echo   - Monitor: type mcp_monitor.log
-echo 停止服务: stop-windows.bat
+echo Logs:
+echo   - FastAPI process: server.log
+echo   - FastAPI app: logs\app_*.log
+echo   - CLS MCP: mcp_cls.log
+echo   - Monitor MCP: mcp_monitor.log
+echo.
+echo View live FastAPI logs:
+echo   powershell -NoProfile -Command "Get-Content -Path server.log -Wait -Tail 80 -Encoding UTF8"
+echo Stop services: stop-windows.bat
 echo ====================================
-pause
+goto :done
+
+:fail
+echo.
+echo Startup failed. See the messages above.
+popd >nul
+if not defined NO_PAUSE pause
+exit /b 1
+
+:done
+popd >nul
+if not defined NO_PAUSE pause
+exit /b 0

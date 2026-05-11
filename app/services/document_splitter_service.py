@@ -8,6 +8,7 @@ from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharac
 from loguru import logger
 
 from app.config import config
+from app.services.embedding_input_guard import estimate_tokens
 
 
 class DocumentSplitterService:
@@ -35,6 +36,7 @@ class DocumentSplitterService:
         """初始化文档分割服务"""
         self.chunk_size = config.chunk_max_size
         self.chunk_overlap = config.chunk_overlap
+        self.embedding_token_budget = max(1, config.embedding_max_tokens - config.embedding_token_safety_margin)
 
         # Markdown 标题分割器 (只按一级和二级标题分割，减少分片数)
         # 例如 Markdown 内容：
@@ -60,6 +62,12 @@ class DocumentSplitterService:
             chunk_size=self.chunk_size * 2,  # 加倍chunk_size，减少分片数
             chunk_overlap=self.chunk_overlap,
             length_function=len,
+            is_separator_regex=False,
+        )
+        self.embedding_budget_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=self.embedding_token_budget,
+            chunk_overlap=min(self.chunk_overlap, max(0, self.embedding_token_budget // 5)),
+            length_function=estimate_tokens,
             is_separator_regex=False,
         )
 
@@ -114,6 +122,7 @@ class DocumentSplitterService:
             # 标题切分可能产生很短的碎片；太短的 chunk 语义信息不足，检索时容易不准
             # 所以这里会尝试把小片段合并到前一个片段中
             final_docs = self._merge_small_chunks(docs_after_split, min_size=300)
+            final_docs = self._enforce_embedding_token_budget(final_docs)
 
             # 添加文件路径元数据
             # 这些字段用于后续：
@@ -178,6 +187,7 @@ class DocumentSplitterService:
                     }
                 ],
             )
+            docs = self._enforce_embedding_token_budget(docs)
 
             logger.info(f"文本分割完成: {file_path} -> {len(docs)} 个分片")
             return docs
@@ -261,6 +271,53 @@ class DocumentSplitterService:
             merged_docs.append(current_doc)
 
         return merged_docs
+
+    def _enforce_embedding_token_budget(self, documents: List[Document]) -> List[Document]:
+        if not documents:
+            return []
+
+        safe_docs: List[Document] = []
+        oversized_count = 0
+
+        for doc in documents:
+            if estimate_tokens(doc.page_content) <= self.embedding_token_budget:
+                safe_docs.append(doc)
+                continue
+
+            oversized_count += 1
+            split_docs = self.embedding_budget_splitter.split_documents([doc])
+            for split_doc in split_docs:
+                if estimate_tokens(split_doc.page_content) <= self.embedding_token_budget:
+                    safe_docs.append(split_doc)
+                else:
+                    safe_docs.extend(self._hard_split_document(split_doc))
+
+        if oversized_count:
+            logger.warning(
+                f"文档分片超过 Embedding token 预算，已继续切分: "
+                f"oversized_chunks={oversized_count}, "
+                f"before={len(documents)}, after={len(safe_docs)}, "
+                f"max_tokens={self.embedding_token_budget}"
+            )
+
+        return safe_docs
+
+    def _hard_split_document(self, document: Document) -> List[Document]:
+        chunks: List[Document] = []
+        current = ""
+
+        for char in document.page_content:
+            candidate = current + char
+            if current and estimate_tokens(candidate) > self.embedding_token_budget:
+                chunks.append(Document(page_content=current.strip(), metadata=dict(document.metadata)))
+                current = char
+            else:
+                current = candidate
+
+        if current.strip():
+            chunks.append(Document(page_content=current.strip(), metadata=dict(document.metadata)))
+
+        return chunks
 
 
 # 全局单例

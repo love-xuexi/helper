@@ -16,11 +16,10 @@ LangGraph 会把这个返回值合并回全局状态，之后 replanner 会根�
 
 from typing import Dict, Any
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_qwq import ChatQwen
 from langgraph.prebuilt import ToolNode
 from loguru import logger
 
-from app.config import config
+from app.core.llm_factory import llm_factory
 from app.tools import get_current_time, retrieve_knowledge
 from app.agent.mcp_client import get_mcp_client_with_retry
 from .state import PlanExecuteState
@@ -100,10 +99,9 @@ async def executor(state: PlanExecuteState) -> Dict[str, Any]:
         # 创建 LLM（绑定工具）
         # bind_tools(all_tools) 后，模型就可以在回复里生成 tool_calls。
         # 注意：模型此时只是“决定调用工具”，真正执行工具的是下面的 ToolNode。
-        llm = ChatQwen(
-            model=config.rag_model,
-            api_key=config.dashscope_api_key,
-            temperature=0
+        llm = llm_factory.create_chat_model(
+            temperature=0,
+            streaming=False,
         )
         llm_with_tools = llm.bind_tools(all_tools)
 

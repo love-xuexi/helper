@@ -26,9 +26,9 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from loguru import logger
 from typing_extensions import TypedDict
-from langchain_qwq import ChatQwen
 
 from app.config import config
+from app.core.llm_factory import llm_factory
 from app.tools import get_current_time, retrieve_knowledge
 from app.agent.mcp_client import get_mcp_client_with_retry
 
@@ -120,16 +120,14 @@ class RagAgentService:
         Args:
             streaming: 是否启用流式输出，默认为 True
         """
-        self.model_name = config.rag_model
+        self.model_name = config.effective_chat_model
         self.streaming = streaming
         self.system_prompt = self._build_system_prompt()
 
 
         # 创建 ChatQwen 大模型对象。
         # 这个对象负责真正调用千问模型，后续 create_agent 会把它作为 Agent 的推理核心。
-        self.model = ChatQwen(
-            model=self.model_name,
-            api_key=config.dashscope_api_key,
+        self.model = llm_factory.create_chat_model(
             temperature=0.7,
             streaming=streaming,
         )
@@ -152,7 +150,7 @@ class RagAgentService:
         self.agent = None
         self._agent_initialized = False
 
-        logger.info(f"RAG Agent 服务初始化完成 (ChatQwen), model={self.model_name}, streaming={streaming}")
+        logger.info(f"RAG Agent 服务初始化完成 (OpenAI compatible), model={self.model_name}, streaming={streaming}")
 
     async def _initialize_agent(self):
         """
@@ -398,6 +396,12 @@ class RagAgentService:
                                         "data": text_content,
                                         "node": node_name
                                     }
+                    elif isinstance(getattr(token, "content", None), str) and token.content:
+                        yield {
+                            "type": "content",
+                            "data": token.content,
+                            "node": node_name
+                        }
 
             logger.info(f"[会话 {session_id}] RAG Agent 查询完成（流式）")
             # 告诉前端：本次流式回答已经结束

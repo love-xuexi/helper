@@ -15,8 +15,8 @@ SuperBizAgent 是一个基于 Python 的智能业务 Agent 项目，当前主要
 |---|---|---|
 | Web/API | FastAPI、Uvicorn、SSE Starlette | 提供 HTTP API、SSE 流式响应和静态页面服务 |
 | Agent 编排 | LangChain、LangGraph | RAG Agent 和 AIOps Plan-Execute-Replan 工作流 |
-| LLM | DashScope / 通义千问、`langchain_qwq.ChatQwen` | 聊天、规划、执行、重规划、报告生成 |
-| Embedding | DashScope `text-embedding-v4` | 文档和查询向量化，当前维度为 1024 |
+| LLM | OpenAI 兼容 Chat 接口、`langchain_openai.ChatOpenAI` | 聊天、规划、执行、重规划、报告生成；可接入 DashScope、OpenAI 或其他兼容服务 |
+| Embedding | OpenAI 兼容 Embedding 接口 | 文档和查询向量化，默认维度为 1024，可按服务商配置调整，并对长输入做 token 预算保护 |
 | 向量库 | Milvus | 存储知识库文档分片和向量，collection 名称为 `biz` |
 | 工具协议 | MCP、FastMCP、langchain-mcp-adapters | 对接日志查询和监控查询工具 |
 | 前端 | 原生 HTML/CSS/JS | 支持聊天、流式输出、文件上传、AIOps 触发 |
@@ -62,6 +62,24 @@ Windows 推荐使用：
 | `static/` | 原生前端页面、样式和交互逻辑 |
 | `aiops-docs/` | 预期作为 AIOps 知识库语料目录，目前目录为空 |
 | `project-docs/` | 本次新建的项目理解、计划和后续开发沉淀目录 |
+
+## 4.1 模型配置结构
+
+模型服务已拆分为三组独立配置：
+
+- Chat：`CHAT_API_KEY`、`CHAT_BASE_URL`、`CHAT_MODEL`
+- Embedding：`EMBEDDING_API_KEY`、`EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDING_DIMENSIONS`、`EMBEDDING_ENCODING_FORMAT`、`EMBEDDING_MAX_TOKENS`、`EMBEDDING_TOKEN_SAFETY_MARGIN`
+- Rerank：`RERANK_API_KEY`、`RERANK_BASE_URL`、`RERANK_MODEL`、`RERANK_PROVIDER`
+
+配置优先级是新变量优先，旧变量兼容兜底：
+
+- Chat 未配置时兼容 `DASHSCOPE_API_KEY`、`DASHSCOPE_API_BASE`、`RAG_MODEL`、`DASHSCOPE_MODEL`。
+- Embedding 未配置时兼容 `DASHSCOPE_API_KEY`、`DASHSCOPE_API_BASE`、`DASHSCOPE_EMBEDDING_MODEL`。
+- Rerank 未配置时兼容 `NVIDIA_API_KEY`、`NVIDIA_BASE_URL`，并保留 NVIDIA API Catalog endpoint 自动映射逻辑。
+
+默认路径统一走 OpenAI-compatible 调用；特殊模型或服务商通过 provider 或专用适配逻辑处理。
+
+Embedding 输入预算默认按 `EMBEDDING_MAX_TOKENS - EMBEDDING_TOKEN_SAFETY_MARGIN` 计算。用户检索 query 过长时会先做智能压缩，优先保留服务名、告警、错误码、状态码、CPU/内存/磁盘等高信号片段；如果仍超限，再从尾部截断。知识库文档入库阶段不会对原文做智能压缩或静默截断，而是在文档分割阶段继续切分为更小分片，避免 embedding 服务返回 413 token 超限。
 
 ## 5. 核心链路一：RAG Chat Agent
 
@@ -122,22 +140,25 @@ Windows 推荐使用：
    - Markdown：先按 `#`、`##` 标题切分，再按字符长度二次切分，并合并过短分片。
    - TXT：直接使用递归字符切分。
 6. `vector_store_manager.add_documents(...)` 生成 UUID、调用 embedding、写入 Milvus。
-7. 文档进入 `biz` collection，字段包括 `id`、`content`、`vector`、`metadata`。
+7. 文档进入 `biz` collection，字段包括 `id`、`content`、`vector`、`metadata`。如果分片超过 embedding token 预算，分割服务会继续切成更小分片，而不是压缩或截断原文。
 
 ### 检索数据流
 
 1. Agent 调用 `retrieve_knowledge(query)`。
-2. 工具通过 `vector_store_manager.get_vector_store().as_retriever(...)` 获取 LangChain retriever。
-3. retriever 使用 DashScope Embedding 将 query 向量化。
-4. Milvus 返回 top-k 文档分片。
-5. `format_docs(...)` 将文档格式化为带来源和标题的上下文文本。
-6. 工具结果返回给 Agent，Agent 再组织答案。
+2. 工具调用 `rag_retrieval_service.retrieve(query)`。
+3. 检索服务先将超长 query 压缩为 embedding 安全输入，再通过 LangChain Milvus retriever 扩大召回 `rag_candidate_top_k` 个候选分片。
+4. `rerank_service` 根据 `RERANK_PROVIDER` 使用同一个安全 query，通过 OpenAI-compatible `/rerank` 或 NVIDIA 特殊 endpoint 对候选文档按 query-document 相关性重排序。
+5. 重排序成功后截断为 `rag_top_k` 个最终文档；如果远程 rerank API 不可用，则降级为本地关键词重排序。
+6. `format_docs(...)` 将最终文档格式化为带来源和标题的上下文文本。
+7. 工具结果返回给 Agent，Agent 再组织答案。
 
 ### 当前特点
 
 - 只支持 `.txt`、`.md`。
 - 上传接口即使索引失败也会返回上传成功，只在日志中记录索引失败。
-- `vector_search_service.py` 提供了更底层的 PyMilvus 检索封装，但当前主 RAG 工具使用的是 LangChain Milvus retriever。
+- `vector_search_service.py` 提供了更底层的 PyMilvus 检索封装；当前主 RAG 工具通过 `rag_retrieval_service.py` 使用 LangChain Milvus retriever 做候选召回，再进入 rerank。
+- RAG 已支持 OpenAI-compatible Rerank，并保留 NVIDIA 特殊 provider；配置来自 `RERANK_*`，旧 `NVIDIA_*` 变量仍作为兼容兜底。
+- RAG 检索入口会对长 query 做智能压缩；知识库入库阶段通过文档继续切分控制 token 预算，避免长文档片段触发 embedding provider 的 512 token 限制。
 - 目前没有文档列表、删除文档、重建索引、检索结果调试等管理接口。
 
 ## 7. 核心链路三：AIOps Plan-Execute-Replan Agent

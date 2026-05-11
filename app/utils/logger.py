@@ -8,6 +8,15 @@ from loguru import logger
 from app.config import config
 
 
+def _configure_stdout_encoding():
+    stdout = sys.stdout
+    if hasattr(stdout, "reconfigure"):
+        try:
+            stdout.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError, ValueError):
+            pass
+
+
 def setup_logger():
     """配置日志系统
 
@@ -16,15 +25,19 @@ def setup_logger():
     2. 添加控制台输出（带颜色）
     3. 添加文件输出（按天轮转，自动压缩，异步写入）
     """
+    _configure_stdout_encoding()
+
     # 移除默认处理器
     logger.remove()
+
+    colorize_stdout = bool(getattr(sys.stdout, "isatty", lambda: False)())
 
     # 添加控制台输出（带颜色格式）
     logger.add(
         sys.stdout,
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{module}</cyan>.<cyan>{function}</cyan>:<cyan>{line}</cyan> | <level>{message}</level>",
         level="DEBUG" if config.debug else "INFO",
-        colorize=True,
+        colorize=colorize_stdout,
         backtrace=True,  # 显示完整异常栈信息
         diagnose=config.debug,  # Debug 模式下显示变量值
     )

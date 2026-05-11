@@ -21,17 +21,20 @@ class LLMFactory:
     # 阿里云 DashScope OpenAI 兼容模式 URL
     DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
-    @staticmethod
+    def __init__(self, settings=None):
+        self.settings = settings or config
+
     def create_chat_model(
+        self,
         model: str | None = None,
         temperature: float = 0.7,
         streaming: bool = True,
         base_url: str | None = None,
         api_key: str | None = None,
     ) -> ChatOpenAI:
-        model = model or config.dashscope_model
-        base_url = base_url or LLMFactory.DASHSCOPE_BASE_URL
-        api_key = api_key or config.dashscope_api_key
+        model = model or self.settings.effective_chat_model
+        base_url = base_url or self.settings.effective_chat_base_url or LLMFactory.DASHSCOPE_BASE_URL
+        api_key = api_key or self.settings.effective_chat_api_key
 
         # 参考：https://help.aliyun.com/zh/model-studio/getting-started/models
         extra_body = {}

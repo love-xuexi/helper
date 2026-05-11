@@ -1,15 +1,19 @@
 """向量嵌入服务模块 - 基于 LangChain Embeddings 标准接口"""
 
-from typing import List
+from typing import Any, Callable, List
 
 from langchain_core.embeddings import Embeddings
 from openai import OpenAI
 from loguru import logger
 
 from app.config import config
+from app.services.embedding_input_guard import (
+    compress_query_for_embedding,
+    estimate_tokens,
+)
 
 
-class DashScopeEmbeddings(Embeddings):
+class OpenAICompatibleEmbeddings(Embeddings):
     """阿里云 DashScope Text Embedding (OpenAI 兼容模式)
     
     实现 LangChain 标准 Embeddings 接口:
@@ -32,8 +36,13 @@ class DashScopeEmbeddings(Embeddings):
     def __init__(
         self,
         api_key: str,
+        base_url: str,
         model: str = "text-embedding-v4",
-        dimensions: int = 1024,
+        dimensions: int | None = 1024,
+        encoding_format: str = "float",
+        max_tokens: int = 1024,
+        token_safety_margin: int = 32,
+        client_factory: Callable[..., Any] = OpenAI,
     ):
         """
         初始化 DashScope Embeddings
@@ -48,22 +57,27 @@ class DashScopeEmbeddings(Embeddings):
             dimensions: 向量维度
         """
         if not api_key or api_key == "your-api-key-here":
-            raise ValueError("请设置环境变量 DASHSCOPE_API_KEY")
+            raise ValueError("请设置 Embedding API Key")
+        if not base_url:
+            raise ValueError("请设置 Embedding Base URL")
         
         # 创建 OpenAI 兼容客户端
         # 后续 self.client.embeddings.create(...) 会请求 DashScope embedding 接口
-        self.client = OpenAI(
+        self.client = client_factory(
             api_key=api_key,
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+            base_url=base_url,
         )
         self.model = model
         self.dimensions = dimensions
+        self.encoding_format = encoding_format
+        self.max_tokens = max_tokens
+        self.token_safety_margin = token_safety_margin
         
         # 打印初始化信息
         masked_key = self._mask_api_key(api_key)
         logger.info(
             f"DashScope Embeddings 初始化完成 - "
-            f"模型: {model}, 维度: {dimensions}, API Key: {masked_key}"
+            f"模型: {model}, 维度: {dimensions}, Base URL: {base_url}, API Key: {masked_key}"
         )
 
     @staticmethod
@@ -107,25 +121,28 @@ class DashScopeEmbeddings(Embeddings):
         
         try:
             logger.info(f"批量嵌入 {len(texts)} 个文档")
-            
-            # 批量调用 API
-            # input=texts 表示一次请求把多个文本块一起送给 embedding 模型
-            # dimensions=self.dimensions 表示要求模型返回指定维度的向量
-            # encoding_format="float" 表示返回 Python 可直接使用的 float 数组
-            response = self.client.embeddings.create(
-                model=self.model,
-                input=texts,
-                dimensions=self.dimensions,
-                encoding_format="float"
-            )
-            
-            # DashScope 返回的 response.data 中，每个 item 对应一个输入文本
-            # item.embedding 就是这个文本的向量
-            embeddings = [item.embedding for item in response.data]
+            safe_texts = [self._prepare_document_text(text) for text in texts]
+            embeddings = []
+            for safe_text in safe_texts:
+                request_kwargs = {
+                    "model": self.model,
+                    "input": safe_text,
+                    "encoding_format": self.encoding_format,
+                }
+                if self.dimensions:
+                    request_kwargs["dimensions"] = self.dimensions
+
+                response = self.client.embeddings.create(
+                    **request_kwargs
+                )
+                embeddings.append(response.data[0].embedding)
+
             logger.debug(f"批量嵌入完成, 维度: {len(embeddings[0])}")
             
             return embeddings
             
+        except ValueError:
+            raise
         except Exception as e:
             logger.error(f"批量嵌入失败: {e}")
             raise RuntimeError(f"批量嵌入失败: {e}") from e
@@ -155,14 +172,20 @@ class DashScopeEmbeddings(Embeddings):
         
         try:
             logger.debug(f"嵌入查询, 长度: {len(text)} 字符")
+            safe_text = self._prepare_query_text(text)
             
             # 单条查询也走同一个 embedding 接口
             # 区别是 input 传入的是一个字符串，而不是字符串列表
+            request_kwargs = {
+                "model": self.model,
+                "input": safe_text,
+                "encoding_format": self.encoding_format,
+            }
+            if self.dimensions:
+                request_kwargs["dimensions"] = self.dimensions
+
             response = self.client.embeddings.create(
-                model=self.model,
-                input=text,
-                dimensions=self.dimensions,
-                encoding_format="float"
+                **request_kwargs
             )
             
             # 单条查询只会返回一个 embedding，所以取 response.data[0]
@@ -175,12 +198,34 @@ class DashScopeEmbeddings(Embeddings):
             logger.error(f"查询嵌入失败: {e}")
             raise RuntimeError(f"查询嵌入失败: {e}") from e
 
+    def _embedding_token_budget(self) -> int:
+        return max(1, self.max_tokens - self.token_safety_margin)
+
+    def _prepare_query_text(self, text: str) -> str:
+        budget = self._embedding_token_budget()
+        return compress_query_for_embedding(text, max_tokens=budget)
+
+    def _prepare_document_text(self, text: str) -> str:
+        budget = self._embedding_token_budget()
+        if estimate_tokens(text) <= budget:
+            return text
+        raise ValueError(
+            f"文档片段超过 Embedding token 预算，请先在文档分割阶段继续切分: "
+            f"original_tokens={estimate_tokens(text)}, max_tokens={budget}"
+        )
+
 
 # 全局单例
 # 项目其他地方会直接 import vector_embedding_service 使用同一个 embedding 服务实例。
 # 例如 vector_store_manager 初始化 Milvus VectorStore 时，会把它作为 embedding_function 传进去。
-vector_embedding_service = DashScopeEmbeddings(
-    api_key=config.dashscope_api_key,
-    model=config.dashscope_embedding_model,
-    dimensions=1024
+DashScopeEmbeddings = OpenAICompatibleEmbeddings
+
+vector_embedding_service = OpenAICompatibleEmbeddings(
+    api_key=config.effective_embedding_api_key,
+    base_url=config.effective_embedding_base_url,
+    model=config.effective_embedding_model,
+    dimensions=config.effective_embedding_dimensions,
+    encoding_format=config.embedding_encoding_format,
+    max_tokens=config.embedding_max_tokens,
+    token_safety_margin=config.embedding_token_safety_margin,
 )

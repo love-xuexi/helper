@@ -19,11 +19,10 @@ replanner 会根据当前剩余计划 plan 和已执行结果 past_steps 判断�
 from textwrap import dedent
 from typing import Dict, Any, List
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_qwq import ChatQwen
 from pydantic import BaseModel, Field
 from loguru import logger
 
-from app.config import config
+from app.core.llm_factory import llm_factory
 from app.tools import get_current_time, retrieve_knowledge
 from app.agent.mcp_client import get_mcp_client_with_retry
 from .state import PlanExecuteState
@@ -189,10 +188,9 @@ async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
     MAX_STEPS = 8
     if len(past_steps) >= MAX_STEPS:
         logger.warning(f"已执行 {len(past_steps)} 个步骤，超过最大限制 {MAX_STEPS}，强制生成最终响应")
-        llm = ChatQwen(
-            model=config.rag_model,
-            api_key=config.dashscope_api_key,
-            temperature=0
+        llm = llm_factory.create_chat_model(
+            temperature=0,
+            streaming=False,
         )
         return await _generate_response(state, llm)
 
@@ -224,10 +222,9 @@ async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
 
     # 创建 LLM
     # temperature=0 让决策更稳定，减少一会儿 continue、一会儿 replan 的随机性。
-    llm = ChatQwen(
-        model=config.rag_model,
-        api_key=config.dashscope_api_key,
-        temperature=0
+    llm = llm_factory.create_chat_model(
+        temperature=0,
+        streaming=False,
     )
 
     # 格式化已执行的步骤
@@ -332,7 +329,7 @@ async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
         return await _generate_response(state, llm)
 
 
-async def _generate_response(state: PlanExecuteState, llm: ChatQwen) -> Dict[str, Any]:
+async def _generate_response(state: PlanExecuteState, llm: Any) -> Dict[str, Any]:
     """生成最终响应
 
     这个函数把原始任务 input 和执行历史 past_steps 交给大模型，
