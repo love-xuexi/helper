@@ -151,6 +151,8 @@ class RagAgentService:
         # Agent 初始化（会在异步方法中完成）
         self.agent = None
         self._agent_initialized = False
+        self.direct_agent = None
+        self._direct_agent_initialized = False
 
         logger.info(f"RAG Agent 服务初始化完成 (OpenAI compatible), model={self.model_name}, streaming={streaming}")
 
@@ -158,6 +160,8 @@ class RagAgentService:
         self.checkpointer = checkpointer
         self.agent = None
         self._agent_initialized = False
+        self.direct_agent = None
+        self._direct_agent_initialized = False
 
     async def _initialize_agent(self):
         """
@@ -201,6 +205,49 @@ class RagAgentService:
         if all_tools:
             tool_names = [tool.name if hasattr(tool, "name") else str(tool) for tool in all_tools]
             logger.info(f"可用工具列表: {', '.join(tool_names)}")
+
+    async def _initialize_direct_agent(self):
+        if self._direct_agent_initialized:
+            return
+
+        self.direct_agent = create_agent(
+            self.model,
+            tools=[],
+            checkpointer=self.checkpointer,
+            system_prompt=self.system_prompt,
+        )
+        self._direct_agent_initialized = True
+
+    def _should_use_agent_tools(self, question: str) -> bool:
+        normalized_question = question.lower()
+        tool_keywords = [
+            "知识库",
+            "文档",
+            "资料",
+            "检索",
+            "根据",
+            "引用",
+            "来源",
+            "现在几点",
+            "当前时间",
+            "今天",
+            "日期",
+            "星期",
+            "日志",
+            "监控",
+            "指标",
+            "cpu",
+            "内存",
+            "memory",
+            "告警",
+            "故障",
+            "异常",
+            "错误",
+            "超时",
+            "timeout",
+            "503",
+        ]
+        return any(keyword in normalized_question for keyword in tool_keywords)
 
     def _build_system_prompt(self) -> str:
         """
@@ -260,24 +307,19 @@ class RagAgentService:
             str: 完整答案
         """
         try:
-            # 第一次调用时会创建 Agent，并加载本地工具 + MCP 工具。
-            # 后续同一个服务实例再次调用时，_initialize_agent() 会直接返回，不重复初始化。
-            await self._initialize_agent()
-
             logger.info(f"[会话 {session_id}] RAG Agent 收到查询（非流式）: {question}")
 
-            # 构建消息列表（系统提示 + 用户问题）
-            # 这一轮真正送给 Agent 的输入大概是：
-            # {
-            #     "messages": [
-            #         SystemMessage(content="你是一个专业的AI助手..."),
-            #         HumanMessage(content="CPU 飙高怎么排查？")
-            #     ]
-            # }
-            messages = [
-                SystemMessage(content=self.system_prompt),
-                HumanMessage(content=question)
-            ]
+            if self._should_use_agent_tools(question):
+                await self._initialize_agent()
+                agent = self.agent
+                messages = [
+                    SystemMessage(content=self.system_prompt),
+                    HumanMessage(content=question)
+                ]
+            else:
+                await self._initialize_direct_agent()
+                agent = self.direct_agent
+                messages = [HumanMessage(content=question)]
 
             # 构建 Agent 输入
             agent_input = {"messages": messages}
@@ -292,7 +334,7 @@ class RagAgentService:
             # 非流式执行 Agent。
             # 返回 result 通常是一个 dict，里面包含完整的 messages 列表。
             # messages 中可能包括：用户消息、模型工具调用消息、工具结果消息、最终回答消息。
-            result = await self.agent.ainvoke(
+            result = await agent.ainvoke(
                 input=agent_input,
                 config=config_dict,
             )
@@ -357,18 +399,19 @@ class RagAgentService:
                 - data: 具体内容
         """
         try:
-            # 第一次调用时会创建 Agent，并加载本地工具 + MCP 工具。
-            # 流式和非流式共用同一个 self.agent。
-            await self._initialize_agent()
-
             logger.info(f"[会话 {session_id}] RAG Agent 收到查询（流式）: {question}")
 
-            # 构建消息列表（系统提示 + 用户问题）
-            # 和 query(...) 一样，这里也会把系统提示词和本轮用户问题一起交给 Agent。
-            messages = [
-                SystemMessage(content=self.system_prompt),
-                HumanMessage(content=question)
-            ]
+            if self._should_use_agent_tools(question):
+                await self._initialize_agent()
+                agent = self.agent
+                messages = [
+                    SystemMessage(content=self.system_prompt),
+                    HumanMessage(content=question)
+                ]
+            else:
+                await self._initialize_direct_agent()
+                agent = self.direct_agent
+                messages = [HumanMessage(content=question)]
 
             # 构建 Agent 输入
             agent_input = {"messages": messages}
@@ -384,7 +427,7 @@ class RagAgentService:
 
             # 流式执行 Agent。
             # stream_mode="messages" 表示每当模型或工具产生新消息片段时，就异步吐出来。
-            async for token, metadata in self.agent.astream(
+            async for token, metadata in agent.astream(
                 input=agent_input,
                 config=config_dict,
                 stream_mode="messages",

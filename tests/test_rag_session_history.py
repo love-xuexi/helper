@@ -1,6 +1,6 @@
 import asyncio
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage, ToolMessage
 
 from app.services.rag_agent_service import RagAgentService
 
@@ -63,6 +63,34 @@ class FakeCheckpointerWithInternalMessages:
         }
 
 
+class FakeDirectAgent:
+    def __init__(self):
+        self.called = False
+        self.input = None
+        self.config = None
+
+    async def ainvoke(self, input, config):
+        self.called = True
+        self.input = input
+        self.config = config
+        return {"messages": [AIMessage(content="我是一个中文助手。")]}
+
+    async def astream(self, input, config, stream_mode):
+        self.called = True
+        self.input = input
+        self.config = config
+        yield AIMessageChunk(content="我是一个中文助手。"), {}
+
+
+class ExplodingAgent:
+    async def ainvoke(self, input, config):
+        raise AssertionError("tool agent should not be called")
+
+    async def astream(self, input, config, stream_mode):
+        raise AssertionError("tool agent should not be called")
+        yield
+
+
 def test_get_session_history_async_reads_async_checkpoint_dict():
     service = RagAgentService.__new__(RagAgentService)
     service.checkpointer = FakeAsyncCheckpointer()
@@ -72,6 +100,85 @@ def test_get_session_history_async_reads_async_checkpoint_dict():
     assert [item["role"] for item in history] == ["user", "assistant"]
     assert history[0]["content"] == "服务重启后还有记忆吗？"
     assert history[1]["content"] == "有，当前会话状态来自 PostgreSQL checkpoint。"
+
+
+def test_plain_chat_query_uses_direct_agent_and_persists_answer(monkeypatch):
+    import app.services.rag_agent_service as rag_module
+
+    direct_agent = FakeDirectAgent()
+    persisted = []
+    service = RagAgentService.__new__(RagAgentService)
+    service.agent = ExplodingAgent()
+    service.direct_agent = direct_agent
+    service._direct_agent_initialized = True
+    service.system_prompt = "system"
+    monkeypatch.setattr(
+        rag_module.session_persistence_manager,
+        "upsert_chat_session",
+        lambda **kwargs: persisted.append(kwargs),
+    )
+
+    answer = asyncio.run(service.query("你叫什么？", "session-direct"))
+
+    assert answer == "我是一个中文助手。"
+    assert direct_agent.called is True
+    assert direct_agent.input == {"messages": [HumanMessage(content="你叫什么？")]}
+    assert direct_agent.config == {"configurable": {"thread_id": "session-direct"}}
+    assert persisted == [
+        {
+            "session_id": "session-direct",
+            "question": "你叫什么？",
+            "answer": "我是一个中文助手。",
+        }
+    ]
+
+
+def test_plain_chat_stream_uses_direct_agent_and_persists_answer(monkeypatch):
+    import app.services.rag_agent_service as rag_module
+
+    direct_agent = FakeDirectAgent()
+    persisted = []
+    service = RagAgentService.__new__(RagAgentService)
+    service.agent = ExplodingAgent()
+    service._agent_initialized = True
+    service.direct_agent = direct_agent
+    service._direct_agent_initialized = True
+    service.system_prompt = "system"
+    monkeypatch.setattr(
+        rag_module.session_persistence_manager,
+        "upsert_chat_session",
+        lambda **kwargs: persisted.append(kwargs),
+    )
+
+    async def collect():
+        return [chunk async for chunk in service.query_stream("你叫什么？", "session-stream")]
+
+    chunks = asyncio.run(collect())
+
+    assert chunks == [
+        {"type": "content", "data": "我是一个中文助手。", "node": "unknown"},
+        {"type": "complete"},
+    ]
+    assert direct_agent.called is True
+    assert direct_agent.input == {"messages": [HumanMessage(content="你叫什么？")]}
+    assert direct_agent.config == {"configurable": {"thread_id": "session-stream"}}
+    assert persisted == [
+        {
+            "session_id": "session-stream",
+            "question": "你叫什么？",
+            "answer": "我是一个中文助手。",
+        }
+    ]
+
+
+def test_rag_agent_tool_routing_detects_tool_questions():
+    service = RagAgentService.__new__(RagAgentService)
+
+    assert service._should_use_agent_tools("你叫什么？") is False
+    assert service._should_use_agent_tools("服务重启后还有记忆吗？") is False
+    assert service._should_use_agent_tools("现在几点？") is True
+    assert service._should_use_agent_tools("查询 order-api 的 CPU 指标") is True
+    assert service._should_use_agent_tools("根据知识库回答 PostgreSQL 会话保存") is True
 
 
 def test_get_session_history_ignores_internal_agent_messages():
