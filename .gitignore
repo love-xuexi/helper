@@ -1,4 +1,4 @@
-# Python
+﻿# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -81,3 +81,5 @@ dmypy.json
 # Ruff
 .ruff_cache/
 
+job_hunter/
+.worktrees/

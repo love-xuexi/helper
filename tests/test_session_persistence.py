@@ -1,3 +1,5 @@
+import asyncio
+
 from app.config import Settings
 
 
@@ -43,6 +45,81 @@ def test_postgres_backend_requires_dsn():
 
     with pytest.raises(ValueError, match="POSTGRES_DSN"):
         manager.initialize()
+
+
+def test_postgres_backend_initializes_async_checkpointer(monkeypatch):
+    settings = Settings(
+        _env_file=None,
+        session_checkpoint_backend="postgres",
+        postgres_dsn="postgresql://superbiz:superbiz_dev@localhost:5432/super_biz_agent",
+    )
+    manager = SessionPersistenceManager(settings=settings)
+    events = []
+
+    class DummyAsyncCheckpointer:
+        async def setup(self):
+            events.append("checkpoint_setup")
+
+        async def aget_tuple(self, config):
+            return None
+
+    dummy_checkpointer = DummyAsyncCheckpointer()
+
+    class DummyAsyncContext:
+        async def __aenter__(self):
+            events.append("checkpoint_enter")
+            return dummy_checkpointer
+
+        async def __aexit__(self, exc_type, exc, tb):
+            events.append("checkpoint_exit")
+
+    class DummyAsyncPostgresSaver:
+        @classmethod
+        def from_conn_string(cls, dsn):
+            events.append(("checkpoint_dsn", dsn))
+            return DummyAsyncContext()
+
+    class DummyCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, *args, **kwargs):
+            events.append("session_store_sql")
+
+    class DummyConnection:
+        def cursor(self):
+            return DummyCursor()
+
+        def commit(self):
+            events.append("session_store_commit")
+
+        def close(self):
+            events.append("session_store_close")
+
+    def fake_connect(*args, **kwargs):
+        events.append(("session_store_dsn", args[0]))
+        return DummyConnection()
+
+    import langgraph.checkpoint.postgres.aio as postgres_aio
+    import psycopg
+
+    monkeypatch.setattr(postgres_aio, "AsyncPostgresSaver", DummyAsyncPostgresSaver)
+    monkeypatch.setattr(psycopg, "connect", fake_connect)
+
+    asyncio.run(manager.initialize_async())
+
+    assert manager.checkpointer is dummy_checkpointer
+    assert hasattr(manager.checkpointer, "aget_tuple")
+    assert ("checkpoint_dsn", settings.postgres_dsn) in events
+    assert ("session_store_dsn", settings.postgres_dsn) in events
+
+    asyncio.run(manager.close_async())
+
+    assert "checkpoint_exit" in events
+    assert "session_store_close" in events
 
 
 def test_chat_session_metadata_title_from_question():

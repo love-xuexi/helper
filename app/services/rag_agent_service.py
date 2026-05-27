@@ -17,10 +17,12 @@ from typing import Annotated, Any, AsyncGenerator, Dict, Sequence
 
 from langchain.agents import create_agent
 from langchain_core.messages import (
+    AIMessage,
     BaseMessage,
     HumanMessage,
     RemoveMessage,
     SystemMessage,
+    ToolMessage,
 )
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from loguru import logger
@@ -478,50 +480,74 @@ class RagAgentService:
             
             # checkpoint_tuple 可能是命名元组或普通元组，安全地提取 checkpoint
             # 通常第一个元素是 checkpoint 数据
-            if isinstance(checkpoint_tuple, dict):
-                checkpoint_data = checkpoint_tuple
-            elif hasattr(checkpoint_tuple, 'checkpoint'):
-                checkpoint_data = checkpoint_tuple.checkpoint  # type: ignore
-            else:
-                # 如果是普通元组，第一个元素是 checkpoint
-                checkpoint_data = checkpoint_tuple[0] if checkpoint_tuple else {}
-            
             # 从检查点中提取消息
             # LangGraph checkpoint 的内部结构比较深，messages 存在 channel_values 里
-            messages = checkpoint_data.get("channel_values", {}).get("messages", [])
-            
             # 转换为前端需要的格式
-            history = []
-            for msg in messages:
-                # 跳过系统消息
-                if isinstance(msg, SystemMessage):
-                    continue
-                    
-                role = "user" if isinstance(msg, HumanMessage) else "assistant"
-                content = msg.content if hasattr(msg, 'content') else str(msg)
-                
-                # 提取时间戳（如果有的话）
-                timestamp = getattr(msg, 'timestamp', None)
-                if timestamp:
-                    history.append({
-                        "role": role,
-                        "content": content,
-                        "timestamp": timestamp
-                    })
-                else:
-                    from datetime import datetime
-                    history.append({
-                        "role": role,
-                        "content": content,
-                        "timestamp": datetime.now().isoformat()
-                    })
-            
+            history = self._checkpoint_to_history(checkpoint_tuple)
             logger.info(f"获取会话历史: {session_id}, 消息数量: {len(history)}")
             return history
             
         except Exception as e:
             logger.error(f"获取会话历史失败: {session_id}, 错误: {e}")
             return []
+
+    async def get_session_history_async(self, session_id: str) -> list:
+        try:
+            config = {"configurable": {"thread_id": session_id}}
+            if hasattr(self.checkpointer, "aget"):
+                checkpoint_tuple = await self.checkpointer.aget(config)
+            else:
+                checkpoint_tuple = self.checkpointer.get(config)
+
+            history = self._checkpoint_to_history(checkpoint_tuple)
+            logger.info(f"获取会话历史: {session_id}, 消息数量: {len(history)}")
+            return history
+
+        except Exception as e:
+            logger.error(f"获取会话历史失败: {session_id}, 错误: {e}")
+            return []
+
+    def _checkpoint_to_history(self, checkpoint_tuple: Any) -> list:
+        if not checkpoint_tuple:
+            return []
+
+        if isinstance(checkpoint_tuple, dict):
+            checkpoint_data = checkpoint_tuple
+        elif hasattr(checkpoint_tuple, 'checkpoint'):
+            checkpoint_data = checkpoint_tuple.checkpoint
+        else:
+            checkpoint_data = checkpoint_tuple[0] if checkpoint_tuple else {}
+
+        messages = checkpoint_data.get("channel_values", {}).get("messages", [])
+        history = []
+        for msg in messages:
+            if isinstance(msg, (SystemMessage, ToolMessage)):
+                continue
+            if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+                continue
+            if not isinstance(msg, (HumanMessage, AIMessage)):
+                continue
+
+            role = "user" if isinstance(msg, HumanMessage) else "assistant"
+            content = msg.content if hasattr(msg, 'content') else str(msg)
+            if not content:
+                continue
+            timestamp = getattr(msg, 'timestamp', None)
+            if timestamp:
+                history.append({
+                    "role": role,
+                    "content": content,
+                    "timestamp": timestamp
+                })
+            else:
+                from datetime import datetime
+                history.append({
+                    "role": role,
+                    "content": content,
+                    "timestamp": datetime.now().isoformat()
+                })
+
+        return history
 
     def clear_session(self, session_id: str) -> bool:
         """

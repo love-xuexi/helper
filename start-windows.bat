@@ -149,7 +149,7 @@ echo.
 
 echo [9/9] Starting FastAPI service...
 type nul > "server.log"
-start "SuperBizAgent API" cmd /c ""%PYTHON_CMD%" -m uvicorn app.main:app --host 0.0.0.0 --port 9900 > "server.log" 2>&1"
+start "SuperBizAgent API" cmd /c ""%PYTHON_CMD%" -m app.run_server > "server.log" 2>&1"
 timeout /t 2 /nobreak >nul
 start "SuperBizAgent Logs" powershell -NoProfile -ExecutionPolicy Bypass -NoExit -Command "$Host.UI.RawUI.WindowTitle='SuperBizAgent Logs'; Get-Content -Path 'server.log' -Wait -Tail 80 -Encoding UTF8"
 echo [INFO] Waiting for API startup...

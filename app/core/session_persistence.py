@@ -136,6 +136,21 @@ class SessionPersistenceManager:
 
         self._initialize_postgres()
 
+    async def initialize_async(self) -> None:
+        if self.backend == "memory":
+            self.checkpointer = MemorySaver()
+            self.session_store = None
+            logger.info("[SessionPersistence] 使用内存会话 checkpoint")
+            return
+
+        if self.backend != "postgres":
+            raise ValueError(f"Unsupported SESSION_CHECKPOINT_BACKEND: {self.backend}")
+
+        if not self.settings.postgres_dsn:
+            raise ValueError("POSTGRES_DSN must be configured when SESSION_CHECKPOINT_BACKEND=postgres")
+
+        await self._initialize_postgres_async()
+
     def _initialize_postgres(self) -> None:
         from langgraph.checkpoint.postgres import PostgresSaver
         from psycopg import connect
@@ -144,6 +159,23 @@ class SessionPersistenceManager:
         self._checkpoint_context = PostgresSaver.from_conn_string(self.settings.postgres_dsn)
         self.checkpointer = self._checkpoint_context.__enter__()
         self.checkpointer.setup()
+        self._connection = connect(
+            self.settings.postgres_dsn,
+            autocommit=False,
+            connect_timeout=int(self.settings.postgres_connect_timeout_seconds),
+        )
+        self.session_store = PostgresSessionStore(self._connection)
+        self.session_store.setup()
+        logger.info("[SessionPersistence] PostgreSQL 会话持久化初始化完成")
+
+    async def _initialize_postgres_async(self) -> None:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+        from psycopg import connect
+
+        logger.info("[SessionPersistence] 正在初始化 PostgreSQL 会话持久化")
+        self._checkpoint_context = AsyncPostgresSaver.from_conn_string(self.settings.postgres_dsn)
+        self.checkpointer = await self._checkpoint_context.__aenter__()
+        await self.checkpointer.setup()
         self._connection = connect(
             self.settings.postgres_dsn,
             autocommit=False,
@@ -172,8 +204,19 @@ class SessionPersistenceManager:
         if self._connection is not None:
             self._connection.close()
             self._connection = None
-        if self._checkpoint_context is not None:
+        if self._checkpoint_context is not None and hasattr(self._checkpoint_context, "__exit__"):
             self._checkpoint_context.__exit__(None, None, None)
+            self._checkpoint_context = None
+
+    async def close_async(self) -> None:
+        if self._connection is not None:
+            self._connection.close()
+            self._connection = None
+        if self._checkpoint_context is not None:
+            if hasattr(self._checkpoint_context, "__aexit__"):
+                await self._checkpoint_context.__aexit__(None, None, None)
+            elif hasattr(self._checkpoint_context, "__exit__"):
+                self._checkpoint_context.__exit__(None, None, None)
             self._checkpoint_context = None
 
 

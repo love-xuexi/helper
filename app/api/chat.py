@@ -328,7 +328,7 @@ async def get_session_info(session_id: str) -> SessionInfoResponse:
     """
     try:
         # 从 RAG Agent 的 MemorySaver checkpointer 中读取会话历史
-        history = rag_agent_service.get_session_history(session_id)
+        history = await rag_agent_service.get_session_history_async(session_id)
 
         return SessionInfoResponse(
             session_id=session_id,

@@ -85,7 +85,7 @@ notepad .env
 
 # 5. 启动 Milvus 向量数据库（Docker Compose）
 docker compose -f vector-database.yml up -d
-
+docker run --name agent-postgres -e POSTGRES_USER=superbiz -e POSTGRES_PASSWORD=superbiz_dev -e POSTGRES_DB=super_biz_agent -p 5432:5432 -d postgres:16
 # 6. 等待 Milvus 启动完成（约 5-10 秒）
 timeout /t 10
 
@@ -267,7 +267,7 @@ MILVUS_PORT=19530
 # 会话持久化配置
 # memory: 默认进程内 MemorySaver；postgres: PostgreSQL checkpoint，服务重启后保留 Agent 状态
 SESSION_CHECKPOINT_BACKEND=memory
-POSTGRES_DSN=postgresql://user:password@localhost:5432/super_biz_agent
+POSTGRES_DSN=postgresql://superbiz:superbiz_dev@localhost:5432/super_biz_agent
 POSTGRES_CONNECT_TIMEOUT_SECONDS=10
 
 # RAG 配置

@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"[API 文档] http://{config.host}:{config.port}/docs")
 
     logger.info("[SessionPersistence] 正在初始化会话持久化...")
-    session_persistence_manager.initialize()
+    await session_persistence_manager.initialize_async()
     chat.rag_agent_service.configure_checkpointer(session_persistence_manager.checkpointer)
     aiops.aiops_service.configure_checkpointer(session_persistence_manager.checkpointer)
     logger.info("[SessionPersistence] 会话持久化初始化完成")
@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
     logger.info("[Milvus] 正在关闭连接...")
     milvus_manager.close()
     logger.info("[SessionPersistence] 正在关闭会话持久化...")
-    session_persistence_manager.close()
+    await session_persistence_manager.close_async()
     logger.info(f"[关闭] {config.app_name} 已关闭")
 
 
