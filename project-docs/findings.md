@@ -45,7 +45,7 @@ SuperBizAgent 是一个基于 FastAPI 的 Python Agent 项目，面向企业智�
 
 - `RagAgentService` 首次调用时异步初始化 Agent，合并本地工具和 MCP 工具后调用 `create_agent(...)`。
 - 本地工具包括 `retrieve_knowledge` 和 `get_current_time`。
-- 会话状态使用 `MemorySaver`，以 `session_id` 作为 LangGraph `thread_id`。
+- 会话状态通过 `session_persistence_manager` 管理，以 `session_id` 作为 LangGraph `thread_id`，可在内存和 PostgreSQL checkpointer 之间显式切换。
 - 非流式接口返回最后一条消息内容；流式接口兼容从 `AIMessage` / `AIMessageChunk` 的 `content_blocks` 或字符串 `content` 中抽取文本片段。
 - 文件中存在 `trim_messages_middleware`，但当前未实际接入 Agent 初始化流程。
 
@@ -90,7 +90,7 @@ SuperBizAgent 是一个基于 FastAPI 的 Python Agent 项目，面向企业智�
 ### 后续重点风险
 
 - AIOps 输入固定、MCP 数据 mock、工具调用轨迹不透明，是后续最值得优先完善的三类问题。
-- 会话状态仅内存保存，不适合长期会话和生产部署。
+- 会话状态已支持 PostgreSQL 持久化模式；生产部署需显式配置 `SESSION_CHECKPOINT_BACKEND=postgres` 和 `POSTGRES_DSN`。
 - 当前缺少系统测试和 Agent 评测体系，功能扩展后需要补齐。
 
 ## 2026-05-11 Windows 启动问题修复补充
@@ -131,3 +131,10 @@ SuperBizAgent 是一个基于 FastAPI 的 Python Agent 项目，面向企业智�
 - 修复：`stop-windows.bat` 增加关闭 `SuperBizAgent Logs` 实时日志窗口的步骤。
 - 验证：真实启动时控制台已能看到中文 FastAPI 日志，`server.log` 中 `UnicodeEncodeError` 数量为 0，停止后日志窗口数量为 0。
 
+
+## 2026-05-27 PostgreSQL 会话持久化发现
+
+- RAG Chat 和 AIOps 都使用 LangGraph `thread_id=session_id`，适合接入统一 checkpointer。
+- FastAPI 路由会在 lifespan 前导入服务单例，因此 PostgreSQL 初始化后需要刷新 RAG/AIOps 服务持有的 checkpointer。
+- LangGraph `checkpointer.get(...)` 在当前版本返回 checkpoint dict；历史读取逻辑需要兼容 dict、checkpoint tuple 和带 `checkpoint` 属性的对象。
+- 前端历史列表不能只依赖 `localStorage`，需要后端提供轻量 `chat_sessions` 索引表用于跨重启展示会话摘要。

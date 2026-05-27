@@ -15,6 +15,7 @@ class SuperBizAgentApp {
         this.initMarkdown();
         this.checkAndSetCentered();
         this.renderChatHistory();
+        this.loadServerChatHistories();
     }
 
     // 初始化Markdown配置
@@ -364,6 +365,34 @@ class SuperBizAgentApp {
         }
     }
     
+
+    async loadServerChatHistories() {
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/chat/sessions`);
+            if (!response.ok) {
+                return;
+            }
+            const data = await response.json();
+            const sessions = data.sessions || [];
+            if (sessions.length === 0) {
+                return;
+            }
+            this.chatHistories = sessions.map(session => ({
+                id: session.session_id,
+                title: session.title || '新对话',
+                messages: [],
+                createdAt: session.created_at,
+                updatedAt: session.updated_at,
+                lastMessagePreview: session.last_message_preview || '',
+                messageCount: session.message_count || 0
+            }));
+            this.saveChatHistories();
+            this.renderChatHistory();
+        } catch (error) {
+            console.warn('加载服务端历史对话失败，继续使用本地缓存:', error);
+        }
+    }
+
     // 保存历史对话列表到localStorage
     saveChatHistories() {
         try {
@@ -713,6 +742,7 @@ class SuperBizAgentApp {
                     // 成功：添加实际响应消息（即使 answer 为空也显示）
                     const answer = chatResponse.answer || '（无回复内容）';
                     this.addMessage('assistant', answer);
+                    await this.loadServerChatHistories();
                 } else if (chatResponse && chatResponse.errorMessage) {
                     // 业务错误
                     throw new Error(chatResponse.errorMessage);
@@ -720,6 +750,7 @@ class SuperBizAgentApp {
                     // 兜底：尝试显示任何可用内容
                     const fallbackAnswer = chatResponse?.answer || chatResponse?.errorMessage || '服务返回了空内容';
                     this.addMessage('assistant', fallbackAnswer);
+                    await this.loadServerChatHistories();
                 }
             } else {
                 // HTTP 成功但业务失败
@@ -1041,6 +1072,7 @@ class SuperBizAgentApp {
                 this.updateCurrentChatHistory();
                 this.renderChatHistory();
             }
+            this.loadServerChatHistories();
         }
     }
 

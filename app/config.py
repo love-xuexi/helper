@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     milvus_port: int = 19530
     milvus_timeout: int = 10000  # 毫秒
 
+    # 会话持久化配置
+    session_checkpoint_backend: str = "memory"
+    postgres_dsn: str = ""
+    postgres_pool_min_size: int = 1
+    postgres_pool_max_size: int = 5
+    postgres_connect_timeout_seconds: float = 10.0
+
     # RAG 配置
     rag_top_k: int = 3
     rag_candidate_top_k: int = 20
@@ -71,6 +78,10 @@ class Settings(BaseSettings):
     mcp_cls_url: str = "http://localhost:8003/mcp"
     mcp_monitor_transport: str = "streamable-http"
     mcp_monitor_url: str = "http://localhost:8004/mcp"
+
+    @property
+    def is_postgres_checkpoint_enabled(self) -> bool:
+        return self.session_checkpoint_backend.lower() == "postgres"
 
     @property
     def mcp_servers(self) -> Dict[str, Dict[str, Any]]:

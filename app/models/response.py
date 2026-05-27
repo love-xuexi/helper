@@ -22,6 +22,20 @@ class SessionInfoResponse(BaseModel):
     history: List[Dict[str, str]] = Field(..., description="历史消息列表")
 
 
+class ChatSessionSummary(BaseModel):
+    session_id: str = Field(..., description="会话 ID")
+    title: str = Field(..., description="会话标题")
+    created_at: str = Field(..., description="创建时间")
+    updated_at: str = Field(..., description="更新时间")
+    last_message_preview: str = Field("", description="最后消息摘要")
+    message_count: int = Field(0, description="消息数量")
+
+
+class ChatSessionListResponse(BaseModel):
+    total: int = Field(..., description="会话总数")
+    sessions: List[ChatSessionSummary] = Field(default_factory=list, description="会话列表")
+
+
 class ApiResponse(BaseModel):
     """通用 API 响应"""
 

@@ -22,13 +22,13 @@ from langchain_core.messages import (
     RemoveMessage,
     SystemMessage,
 )
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from loguru import logger
 from typing_extensions import TypedDict
 
 from app.config import config
 from app.core.llm_factory import llm_factory
+from app.core.session_persistence import session_persistence_manager
 from app.tools import get_current_time, retrieve_knowledge
 from app.agent.mcp_client import get_mcp_client_with_retry
 
@@ -144,13 +144,18 @@ class RagAgentService:
         # 创建内存检查点（用于会话管理）
         # MemorySaver 会按 thread_id 保存消息历史，使同一个 session_id 能保留上下文
         # 注意：这是内存级保存，服务重启后通常会丢失
-        self.checkpointer = MemorySaver()
+        self.checkpointer = session_persistence_manager.checkpointer
 
         # Agent 初始化（会在异步方法中完成）
         self.agent = None
         self._agent_initialized = False
 
         logger.info(f"RAG Agent 服务初始化完成 (OpenAI compatible), model={self.model_name}, streaming={streaming}")
+
+    def configure_checkpointer(self, checkpointer: Any) -> None:
+        self.checkpointer = checkpointer
+        self.agent = None
+        self._agent_initialized = False
 
     async def _initialize_agent(self):
         """
@@ -302,6 +307,11 @@ class RagAgentService:
                     tool_names = [tc.get("name", "unknown") for tc in last_message.tool_calls]
                     logger.info(f"[会话 {session_id}] Agent 调用了工具: {tool_names}")
 
+                session_persistence_manager.upsert_chat_session(
+                    session_id=session_id,
+                    question=question,
+                    answer=answer,
+                )
                 logger.info(f"[会话 {session_id}] RAG Agent 查询完成（非流式）")
                 return answer
 
@@ -368,6 +378,8 @@ class RagAgentService:
                 }
             }
 
+            full_response = ""
+
             # 流式执行 Agent。
             # stream_mode="messages" 表示每当模型或工具产生新消息片段时，就异步吐出来。
             async for token, metadata in self.agent.astream(
@@ -391,18 +403,25 @@ class RagAgentService:
                             if isinstance(block, dict) and block.get('type') == 'text':
                                 text_content = block.get('text', '')
                                 if text_content:
+                                    full_response += text_content
                                     yield {
                                         "type": "content",
                                         "data": text_content,
                                         "node": node_name
                                     }
                     elif isinstance(getattr(token, "content", None), str) and token.content:
+                        full_response += token.content
                         yield {
                             "type": "content",
                             "data": token.content,
                             "node": node_name
                         }
 
+            session_persistence_manager.upsert_chat_session(
+                session_id=session_id,
+                question=question,
+                answer=full_response,
+            )
             logger.info(f"[会话 {session_id}] RAG Agent 查询完成（流式）")
             # 告诉前端：本次流式回答已经结束
             yield {"type": "complete"}
@@ -459,7 +478,9 @@ class RagAgentService:
             
             # checkpoint_tuple 可能是命名元组或普通元组，安全地提取 checkpoint
             # 通常第一个元素是 checkpoint 数据
-            if hasattr(checkpoint_tuple, 'checkpoint'):
+            if isinstance(checkpoint_tuple, dict):
+                checkpoint_data = checkpoint_tuple
+            elif hasattr(checkpoint_tuple, 'checkpoint'):
                 checkpoint_data = checkpoint_tuple.checkpoint  # type: ignore
             else:
                 # 如果是普通元组，第一个元素是 checkpoint
@@ -524,6 +545,7 @@ class RagAgentService:
         try:
             # 使用 checkpointer 的 delete_thread 方法删除该 thread 的所有检查点
             self.checkpointer.delete_thread(session_id)
+            session_persistence_manager.delete_chat_session(session_id)
             
             logger.info(f"已清除会话历史: {session_id}")
             return True

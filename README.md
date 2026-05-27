@@ -212,7 +212,8 @@ super_biz_agent_py/
 │   ├── core/                               # 核心组件
 │   │   ├── __init__.py
 │   │   ├── llm_factory.py                  # LLM 工厂（模型管理）
-│   │   └── milvus_client.py                # Milvus 客户端
+│   │   ├── milvus_client.py                # Milvus 客户端
+│   │   └── session_persistence.py          # 会话 checkpoint 与 PostgreSQL 会话索引
 │   └── utils/                              # 工具类
 │       ├── __init__.py
 │       └── logger.py                       # 日志配置（Loguru）
@@ -263,6 +264,12 @@ EMBEDDING_TOKEN_SAFETY_MARGIN=32
 MILVUS_HOST=localhost
 MILVUS_PORT=19530
 
+# 会话持久化配置
+# memory: 默认进程内 MemorySaver；postgres: PostgreSQL checkpoint，服务重启后保留 Agent 状态
+SESSION_CHECKPOINT_BACKEND=memory
+POSTGRES_DSN=postgresql://user:password@localhost:5432/super_biz_agent
+POSTGRES_CONNECT_TIMEOUT_SECONDS=10
+
 # RAG 配置
 RAG_TOP_K=3
 RAG_CANDIDATE_TOP_K=20
@@ -276,7 +283,51 @@ CHUNK_MAX_SIZE=800
 CHUNK_OVERLAP=100
 ```
 
-模型配置按 Chat、Embedding、Rerank 三组独立读取。`CHAT_*`、`EMBEDDING_*`、`RERANK_*` 优先级最高；未配置时会兼容旧的 `DASHSCOPE_*` 和 `NVIDIA_*` 变量。Embedding 输入会按 `EMBEDDING_MAX_TOKENS - EMBEDDING_TOKEN_SAFETY_MARGIN` 控制预算：用户检索 query 过长时会优先保留服务名、告警、错误码、状态码等高信号信息，再用尾部截断兜底；知识库文档入库时不会智能压缩或截断原文，而是在文档分割阶段继续切成更小分片，避免服务商返回 `input must have less than 512 tokens`。使用 NVIDIA API Catalog 托管服务时，`RERANK_PROVIDER=nvidia`，代码会自动将 `https://integrate.api.nvidia.com` 映射到 `https://ai.api.nvidia.com/v1/retrieval/{model}/reranking`；如果使用自部署 NeMo Retriever Reranking NIM，也可以直接配置完整的 `/v1/ranking` 或 `/v1/retrieval/{model}/reranking` 地址。
+模型配置按 Chat、Embedding、Rerank 三组独立读取。`CHAT_*`、`EMBEDDING_*`、`RERANK_*` 优先级最高；未配置时会兼容旧的 `DASHSCOPE_*` 和 `NVIDIA_*` 变量。会话持久化由 `SESSION_CHECKPOINT_BACKEND=memory|postgres` 显式控制，默认 `memory` 保持原行为，`postgres` 会强依赖 `POSTGRES_DSN`。Embedding 输入会按 `EMBEDDING_MAX_TOKENS - EMBEDDING_TOKEN_SAFETY_MARGIN` 控制预算：用户检索 query 过长时会优先保留服务名、告警、错误码、状态码等高信号信息，再用尾部截断兜底；知识库文档入库时不会智能压缩或截断原文，而是在文档分割阶段继续切成更小分片，避免服务商返回 `input must have less than 512 tokens`。使用 NVIDIA API Catalog 托管服务时，`RERANK_PROVIDER=nvidia`，代码会自动将 `https://integrate.api.nvidia.com` 映射到 `https://ai.api.nvidia.com/v1/retrieval/{model}/reranking`；如果使用自部署 NeMo Retriever Reranking NIM，也可以直接配置完整的 `/v1/ranking` 或 `/v1/retrieval/{model}/reranking` 地址。
+
+
+## 💾 PostgreSQL 会话持久化
+
+项目支持通过显式开关选择会话 checkpoint 后端：
+
+| 模式 | 配置 | 行为 |
+|---|---|---|
+| 内存模式 | `SESSION_CHECKPOINT_BACKEND=memory` | 默认行为，使用 LangGraph `MemorySaver`，服务重启后会话状态不保留 |
+| PostgreSQL 模式 | `SESSION_CHECKPOINT_BACKEND=postgres` | 使用 LangGraph PostgreSQL checkpointer，服务重启后按 `session_id` 恢复上下文 |
+
+启用 PostgreSQL 模式时需要准备：
+
+```bash
+SESSION_CHECKPOINT_BACKEND=postgres
+POSTGRES_DSN=postgresql://user:password@localhost:5432/super_biz_agent
+POSTGRES_CONNECT_TIMEOUT_SECONDS=10
+```
+
+说明：
+
+- `POSTGRES_DSN` 指向的数据库需要提前创建。
+- 应用启动时会执行 LangGraph checkpoint 初始化，并自动创建轻量会话索引表 `chat_sessions`。
+- `chat_sessions` 只保存前端历史列表摘要；完整 Agent 状态以 LangGraph checkpoint 为准。
+- 选择 `postgres` 后，如果 PostgreSQL 不可达、DSN 缺失或初始化失败，FastAPI 会启动失败，避免误以为已经持久化。
+- 前端启动时会请求 `GET /api/chat/sessions` 加载服务端历史会话；如果服务端没有返回历史，则继续使用本地 `localStorage` 回退。
+
+新增会话 API：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/api/chat/sessions?limit=50` | 查询服务端会话摘要列表，按更新时间倒序返回 |
+| `GET` | `/api/chat/session/{session_id}` | 查询指定会话的历史消息 |
+| `POST` | `/api/chat/clear` | 清空指定会话的 checkpoint，并删除会话索引摘要 |
+
+依赖说明：
+
+```bash
+# 使用 uv 的环境建议同步依赖
+uv sync
+
+# 或使用 pip 安装新增依赖
+pip install "langgraph-checkpoint-postgres>=2.0.0" "psycopg[binary,pool]>=3.2.0"
+```
 
 ## 🎯 AIOps 智能运维
 
@@ -394,6 +445,31 @@ docker compose -f vector-database.yml restart
 
 # 或者重启单个服务
 docker compose -f vector-database.yml restart standalone
+```
+
+
+### PostgreSQL 会话持久化启动失败
+
+如果设置了 `SESSION_CHECKPOINT_BACKEND=postgres` 后服务启动失败，请检查：
+
+```bash
+# 1. 是否安装新增依赖
+pip show langgraph-checkpoint-postgres psycopg
+
+# 2. 是否配置 PostgreSQL DSN
+# Windows
+type .env | findstr POSTGRES
+
+# Linux/macOS
+cat .env | grep POSTGRES
+
+# 3. PostgreSQL 是否可连接，且目标数据库已创建
+```
+
+如果只是本地开发且不需要重启保留会话，可以临时改回：
+
+```bash
+SESSION_CHECKPOINT_BACKEND=memory
 ```
 
 ### 服务无法启动

@@ -130,3 +130,25 @@
 - 如果切换到 tokenizer 约束更严格的 embedding provider，可按实际限制调整 `EMBEDDING_MAX_TOKENS` 和 `EMBEDDING_TOKEN_SAFETY_MARGIN`。
 - 如需更精确 token 计数，可后续按目标模型接入专用 tokenizer，但当前实现避免新增 tokenizer 依赖。
 
+
+## 2026-05-27 PostgreSQL 会话持久化
+
+### 已完成
+
+- 新增 `SESSION_CHECKPOINT_BACKEND=memory|postgres`、`POSTGRES_DSN` 和 PostgreSQL 连接相关配置。
+- 新增 `app/core/session_persistence.py`，统一创建内存或 PostgreSQL checkpointer，并维护 `chat_sessions` 会话摘要索引。
+- FastAPI lifespan 启动时初始化会话持久化；`postgres` 模式下缺少 DSN 或数据库初始化失败会阻止启动。
+- RAG Chat 和 AIOps 服务改为使用共享 checkpointer；RAG 成功回答后更新会话摘要，清空会话时同步删除会话索引。
+- 新增 `GET /api/chat/sessions`，前端启动时优先加载服务端会话列表，`localStorage` 继续作为回退。
+- 修复 `get_session_history()` 对 checkpoint dict 返回值的兼容性，避免历史消息读取为空。
+
+### 验证结果
+
+- 已运行 `python -m pytest tests/test_session_persistence.py tests/test_chat_sessions_api.py tests/test_rag_session_history.py -q --no-cov`，结果通过。
+- 已运行 `python -m py_compile app/config.py app/core/session_persistence.py app/main.py app/api/chat.py app/models/response.py app/services/rag_agent_service.py app/services/aiops_service.py`，语法编译通过。
+- 已运行 `node --check static/app.js`，前端脚本语法检查通过。
+
+### 注意事项
+
+- 当前环境未安装 `uv`，`uv.lock` 尚未同步新增 PostgreSQL 依赖；部署前需要在具备 `uv` 的环境执行 `uv lock` 或等效依赖同步。
+- 当前虚拟环境尚未安装 `langgraph-checkpoint-postgres` 和 `psycopg`，启用 `SESSION_CHECKPOINT_BACKEND=postgres` 前需要安装依赖并准备 PostgreSQL。

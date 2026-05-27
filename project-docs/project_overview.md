@@ -81,6 +81,18 @@ Windows 推荐使用：
 
 Embedding 输入预算默认按 `EMBEDDING_MAX_TOKENS - EMBEDDING_TOKEN_SAFETY_MARGIN` 计算。用户检索 query 过长时会先做智能压缩，优先保留服务名、告警、错误码、状态码、CPU/内存/磁盘等高信号片段；如果仍超限，再从尾部截断。知识库文档入库阶段不会对原文做智能压缩或静默截断，而是在文档分割阶段继续切分为更小分片，避免 embedding 服务返回 413 token 超限。
 
+## 会话持久化配置
+
+当前会话持久化由 `app/core/session_persistence.py` 统一管理。
+
+| 配置 | 说明 |
+|---|---|
+| `SESSION_CHECKPOINT_BACKEND=memory` | 默认模式，继续使用进程内 `MemorySaver`，服务重启后状态不保留 |
+| `SESSION_CHECKPOINT_BACKEND=postgres` | 使用 PostgreSQL checkpointer，启动时强依赖 PostgreSQL，连接或初始化失败则启动失败 |
+| `POSTGRES_DSN` | PostgreSQL 连接串，例如 `postgresql://user:pass@localhost:5432/super_biz_agent` |
+
+PostgreSQL 模式下，LangGraph checkpoint 是 Agent 状态的权威存储；`chat_sessions` 表只保存前端历史列表所需的会话摘要，包括 `session_id`、`title`、`created_at`、`updated_at`、`last_message_preview` 和 `message_count`。
+
 ## 5. 核心链路一：RAG Chat Agent
 
 ### 入口
@@ -97,6 +109,7 @@ Embedding 输入预算默认按 `EMBEDDING_MAX_TOKENS - EMBEDDING_TOKEN_SAFETY_M
 | POST | `/api/chat_stream` | SSE 流式问答 |
 | POST | `/api/chat/clear` | 清空某个 session 的会话历史 |
 | GET | `/api/chat/session/{session_id}` | 查询某个 session 的历史消息 |
+| GET | `/api/chat/sessions` | 查询服务端会话摘要列表 |
 
 ### 数据流
 
@@ -107,7 +120,7 @@ Embedding 输入预算默认按 `EMBEDDING_MAX_TOKENS - EMBEDDING_TOKEN_SAFETY_M
    - 加载本地工具：`retrieve_knowledge`、`get_current_time`
    - 加载 MCP 工具：通过 `get_mcp_client_with_retry().get_tools()`
    - 使用 `create_agent(...)` 创建 LangChain Agent
-   - 使用 `MemorySaver` 按 `thread_id=session_id` 保存会话上下文
+   - 通过 `session_persistence_manager` 按 `thread_id=session_id` 保存会话上下文，支持 `MemorySaver` 或 PostgreSQL checkpointer
 5. Agent 根据用户问题决定是否调用工具。
 6. 最终将模型回答返回给 API 层。
 7. 流式接口将内部 chunk 包装为 SSE `message` 事件返回前端。
@@ -115,7 +128,7 @@ Embedding 输入预算默认按 `EMBEDDING_MAX_TOKENS - EMBEDDING_TOKEN_SAFETY_M
 ### 当前特点
 
 - RAG 不是固定的“先检索再生成”，而是 Agent 自主决定是否调用 `retrieve_knowledge`。
-- 会话历史保存在内存 `MemorySaver` 中，服务重启后丢失。
+- 会话状态可通过 `SESSION_CHECKPOINT_BACKEND=memory|postgres` 显式选择；`postgres` 模式使用 PostgreSQL checkpointer 持久化 LangGraph 状态。
 - 代码中定义了 `trim_messages_middleware`，但当前没有实际接入 `create_agent` 调用链路。
 - 流式接口主要透出模型文本片段，对工具调用过程的前端可观测性还比较弱。
 
@@ -262,7 +275,7 @@ planner -> executor -> replanner -> executor -> replanner -> ... -> END
 - AIOps：点击侧边栏按钮触发 `/api/aiops`，展示计划、步骤进度和报告。
 - Markdown 渲染和代码高亮。
 
-当前前端使用 `localStorage` 管理部分历史记录，同时也会调用后端 session API 获取/清空 LangGraph 内存历史。
+当前前端启动时优先调用 `/api/chat/sessions` 加载服务端会话摘要，打开具体会话时调用 `/api/chat/session/{session_id}` 获取 LangGraph 历史；`localStorage` 保留为兼容回退。
 
 ## 10. 当前项目优势
 
@@ -281,7 +294,7 @@ planner -> executor -> replanner -> executor -> replanner -> ... -> END
 | 高 | MCP Server 是 mock | 面试/项目展示时真实性不足 | 增加真实/半真实数据源适配层，或沉淀可复现实验数据集 |
 | 高 | 工具调用过程可观测性不足 | 前端难展示 Agent 为什么这么做 | 在 RAG/AIOps 流式事件中输出工具名、参数、结果摘要、耗时 |
 | 中 | 上传成功不代表索引成功 | 用户会误以为知识库已更新 | 上传接口返回索引状态，失败时给出明确错误 |
-| 中 | 会话状态只在内存中 | 服务重启丢失对话和 AIOps 状态 | 引入持久化 checkpoint，例如 SQLite/Postgres/Redis |
+| 低 | PostgreSQL 会话持久化依赖外部数据库和依赖同步 | `postgres` 模式下数据库不可用会导致启动失败 | 部署时配置 `SESSION_CHECKPOINT_BACKEND`、`POSTGRES_DSN` 并确保依赖安装和数据库可达 |
 | 中 | RAG 检索链路较简单 | 缺少召回质量保障 | 增加检索调试、得分展示、rerank、metadata filter |
 | 中 | 缺少测试 | 后续改功能风险较高 | 增加 API、Service、工具和状态机测试 |
 | 中 | AIOps 每步重复初始化模型/工具 | 性能和延迟可优化 | 缓存工具列表，复用 LLM/ToolNode，增加超时控制 |
@@ -307,7 +320,7 @@ planner -> executor -> replanner -> executor -> replanner -> ... -> END
 ### 第三阶段：让项目更像企业级 Agent
 
 - MCP Server 增加真实适配层或可配置数据源。
-- 引入持久化 session/checkpoint。
+- 在 PostgreSQL 会话持久化基础上继续扩展用户/租户隔离、会话归档和管理能力。
 - 增加权限、租户、数据源隔离配置。
 - 增加 Agent 评测：工具调用准确率、诊断成功率、报告事实一致性、延迟和成本统计。
 - 增加 observability：trace_id、span、结构化日志、调用耗时、错误分类。

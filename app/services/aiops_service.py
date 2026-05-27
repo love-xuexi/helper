@@ -22,10 +22,10 @@ execute(...) 最终不是一次性返回字符串，而是持续 yield 事件给
 
 from typing import AsyncGenerator, Dict, Any
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver
 from loguru import logger
 
 from app.agent.aiops import PlanExecuteState, planner, executor, replanner
+from app.core.session_persistence import session_persistence_manager
 
 
 # 节点名称常量
@@ -51,9 +51,13 @@ class AIOpsService:
         MemorySaver 是 LangGraph 的内存 checkpoint。
         它会根据 thread_id 保存一次图执行中的状态，后面可以通过 get_state 取最终状态。
         """
-        self.checkpointer = MemorySaver()
+        self.checkpointer = session_persistence_manager.checkpointer
         self.graph = self._build_graph()
         logger.info("Plan-Execute-Replan Service 初始化完成")
+
+    def configure_checkpointer(self, checkpointer: Any) -> None:
+        self.checkpointer = checkpointer
+        self.graph = self._build_graph()
 
     def _build_graph(self):
         """构建 Plan-Execute-Replan 工作流

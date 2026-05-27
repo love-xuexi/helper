@@ -26,8 +26,9 @@ import json
 from fastapi import APIRouter, HTTPException
 from sse_starlette.sse import EventSourceResponse
 from app.models.request import ChatRequest, ClearRequest
-from app.models.response import SessionInfoResponse, ApiResponse
+from app.models.response import SessionInfoResponse, ApiResponse, ChatSessionListResponse
 from app.services.rag_agent_service import rag_agent_service
+from app.core.session_persistence import session_persistence_manager
 from loguru import logger
 
 router = APIRouter()
@@ -288,6 +289,17 @@ async def clear_session(request: ClearRequest):
 
     except Exception as e:
         logger.error(f"清空会话错误: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/chat/sessions", response_model=ChatSessionListResponse)
+async def list_chat_sessions(limit: int = 50) -> ChatSessionListResponse:
+    try:
+        safe_limit = max(1, min(limit, 100))
+        sessions = session_persistence_manager.list_chat_sessions(limit=safe_limit)
+        return ChatSessionListResponse(total=len(sessions), sessions=sessions)
+    except Exception as e:
+        logger.error(f"获取会话列表错误: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

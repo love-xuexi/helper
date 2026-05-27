@@ -14,6 +14,7 @@ from app.config import config
 from loguru import logger
 from app.api import chat, health, file, aiops
 from app.core.milvus_client import milvus_manager
+from app.core.session_persistence import session_persistence_manager
 
 
 @asynccontextmanager
@@ -25,6 +26,12 @@ async def lifespan(app: FastAPI):
     logger.info(f"[环境] {'开发' if config.debug else '生产'}")
     logger.info(f"[服务地址] http://{config.host}:{config.port}")
     logger.info(f"[API 文档] http://{config.host}:{config.port}/docs")
+
+    logger.info("[SessionPersistence] 正在初始化会话持久化...")
+    session_persistence_manager.initialize()
+    chat.rag_agent_service.configure_checkpointer(session_persistence_manager.checkpointer)
+    aiops.aiops_service.configure_checkpointer(session_persistence_manager.checkpointer)
+    logger.info("[SessionPersistence] 会话持久化初始化完成")
     
     # 连接 Milvus
     logger.info("[Milvus] 正在连接...")
@@ -38,6 +45,8 @@ async def lifespan(app: FastAPI):
     # 关闭时执行
     logger.info("[Milvus] 正在关闭连接...")
     milvus_manager.close()
+    logger.info("[SessionPersistence] 正在关闭会话持久化...")
+    session_persistence_manager.close()
     logger.info(f"[关闭] {config.app_name} 已关闭")
 
 
