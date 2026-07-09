@@ -51,8 +51,11 @@ repos:
         exclude: ^tests/
 
   # Python docstring 格式化
+  # 注：v1.7.5 的 .pre-commit-hooks.yaml 使用了已被 pre-commit 4.x 移除的
+  # python_venv language，会导致 InvalidManifestError。这里固定到官方修复该问题的
+  # 提交（PR #287），在新版 tag 发布前保持 pre-commit 可用。
   - repo: https://github.com/PyCQA/docformatter
-    rev: v1.7.5
+    rev: 06907d0267368b49b9180eed423fae5697c1e909
     hooks:
       - id: docformatter
         args: [--in-place, --wrap-summaries=100, --wrap-descriptions=100]

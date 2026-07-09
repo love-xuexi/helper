@@ -66,8 +66,8 @@ def test_llm_factory_uses_default_chat_config_from_settings():
     llm = LLMFactory(settings=settings).create_chat_model(streaming=False)
 
     assert llm.model_name == "chat-model"
-    assert str(llm.openai_api_base).rstrip("/") == "https://chat.example.com/v1"
-    assert llm.openai_api_key.get_secret_value() == "chat-key"
+    assert str(llm.api_base).rstrip("/") == "https://chat.example.com/v1"
+    assert llm.api_key.get_secret_value() == "chat-key"
 
 
 def test_embedding_service_uses_independent_base_url_and_key():
@@ -119,8 +119,7 @@ def test_embedding_service_compresses_long_query_before_api_call():
         client_factory=FakeOpenAI,
     )
     long_query = (
-        "普通上下文" * 500
-        + " 服务 order-api CPU 99% timeout HTTP 503 service unavailable 错误码 E5002"
+        "普通上下文" * 500 + " 服务 order-api CPU 99% timeout HTTP 503 service unavailable 错误码 E5002"
     )
 
     result = embeddings.embed_query(long_query)
