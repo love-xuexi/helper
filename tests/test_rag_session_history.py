@@ -1,6 +1,12 @@
 import asyncio
 
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 
 from app.services.rag_agent_service import RagAgentService
 
@@ -118,16 +124,16 @@ def test_plain_chat_query_uses_direct_agent_and_persists_answer(monkeypatch):
         lambda **kwargs: persisted.append(kwargs),
     )
 
-    answer = asyncio.run(service.query("你叫什么？", "session-direct"))
+    result = asyncio.run(service.query("你是谁？", "session-direct"))
 
-    assert answer == "我是一个中文助手。"
+    assert result == {"answer": "我是一个中文助手。", "sources": []}
     assert direct_agent.called is True
-    assert direct_agent.input == {"messages": [HumanMessage(content="你叫什么？")]}
+    assert direct_agent.input == {"messages": [HumanMessage(content="你是谁？")]}
     assert direct_agent.config == {"configurable": {"thread_id": "session-direct"}}
     assert persisted == [
         {
             "session_id": "session-direct",
-            "question": "你叫什么？",
+            "question": "你是谁？",
             "answer": "我是一个中文助手。",
         }
     ]
@@ -151,7 +157,7 @@ def test_plain_chat_stream_uses_direct_agent_and_persists_answer(monkeypatch):
     )
 
     async def collect():
-        return [chunk async for chunk in service.query_stream("你叫什么？", "session-stream")]
+        return [chunk async for chunk in service.query_stream("你是谁？", "session-stream")]
 
     chunks = asyncio.run(collect())
 
@@ -160,12 +166,12 @@ def test_plain_chat_stream_uses_direct_agent_and_persists_answer(monkeypatch):
         {"type": "complete"},
     ]
     assert direct_agent.called is True
-    assert direct_agent.input == {"messages": [HumanMessage(content="你叫什么？")]}
+    assert direct_agent.input == {"messages": [HumanMessage(content="你是谁？")]}
     assert direct_agent.config == {"configurable": {"thread_id": "session-stream"}}
     assert persisted == [
         {
             "session_id": "session-stream",
-            "question": "你叫什么？",
+            "question": "你是谁？",
             "answer": "我是一个中文助手。",
         }
     ]
@@ -174,8 +180,12 @@ def test_plain_chat_stream_uses_direct_agent_and_persists_answer(monkeypatch):
 def test_rag_agent_tool_routing_detects_tool_questions():
     service = RagAgentService.__new__(RagAgentService)
 
-    assert service._should_use_agent_tools("你叫什么？") is False
-    assert service._should_use_agent_tools("服务重启后还有记忆吗？") is False
+    # 寒暄/闲聊短句走无工具直连模式
+    assert service._should_use_agent_tools("你好") is False
+    assert service._should_use_agent_tools("你是谁？") is False
+    assert service._should_use_agent_tools("谢谢") is False
+    # 其余问题默认走带工具 Agent（知识库检索由模型按需触发）
+    assert service._should_use_agent_tools("服务重启后还有记忆吗？") is True
     assert service._should_use_agent_tools("现在几点？") is True
     assert service._should_use_agent_tools("查询 order-api 的 CPU 指标") is True
     assert service._should_use_agent_tools("根据知识库回答 PostgreSQL 会话保存") is True

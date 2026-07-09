@@ -1,4 +1,4 @@
-"""对话接口
+"""对话接口.
 
 提供基于 RAG Agent 的普通对话和流式对话接口
 
@@ -23,20 +23,22 @@ curl -X POST "http://localhost:8000/api/chat" \
 """
 
 import json
+
 from fastapi import APIRouter, HTTPException
-from sse_starlette.sse import EventSourceResponse
-from app.models.request import ChatRequest, ClearRequest
-from app.models.response import SessionInfoResponse, ApiResponse, ChatSessionListResponse
-from app.services.rag_agent_service import rag_agent_service
-from app.core.session_persistence import session_persistence_manager
 from loguru import logger
+from sse_starlette.sse import EventSourceResponse
+
+from app.core.session_persistence import session_persistence_manager
+from app.models.request import ChatRequest, ClearRequest
+from app.models.response import ApiResponse, ChatSessionListResponse, SessionInfoResponse
+from app.services.rag_agent_service import rag_agent_service
 
 router = APIRouter()
 
 
 @router.post("/chat")
 async def chat(request: ChatRequest):
-    """快速对话接口
+    """快速对话接口.
 
     请求示例：
     POST /chat
@@ -70,11 +72,8 @@ async def chat(request: ChatRequest):
         # 调用 RAG Agent 的非流式接口。
         # request.question 是用户问题。
         # request.id 会作为 session_id/thread_id，用于区分不同会话并保存上下文。
-        # 返回值 answer 是一个完整字符串，而不是流式片段。
-        answer = await rag_agent_service.query(
-            request.question,
-            session_id=request.id
-        )
+        # 返回值包含完整答案和命中的引用来源片段。
+        result = await rag_agent_service.query(request.question, session_id=request.id)
 
         logger.info(f"[会话 {request.id}] 快速对话完成")
 
@@ -84,9 +83,10 @@ async def chat(request: ChatRequest):
             "message": "success",
             "data": {
                 "success": True,
-                "answer": answer,
-                "errorMessage": None
-            }
+                "answer": result["answer"],
+                "sources": result["sources"],
+                "errorMessage": None,
+            },
         }
 
     except Exception as e:
@@ -96,11 +96,7 @@ async def chat(request: ChatRequest):
         return {
             "code": 500,
             "message": "error",
-            "data": {
-                "success": False,
-                "answer": None,
-                "errorMessage": str(e)
-            }
+            "data": {"success": False, "answer": None, "errorMessage": str(e)},
         }
 
 
@@ -141,8 +137,7 @@ async def chat_stream(request: ChatRequest):
     logger.info(f"[会话 {request.id}] 收到流式对话请求: {request.question}")
 
     async def event_generator():
-        """
-        SSE 事件生成器
+        """SSE 事件生成器.
 
         rag_agent_service.query_stream(...) 会不断 yield 内部 chunk，例如：
         {"type": "content", "data": "CPU"}
@@ -165,7 +160,9 @@ async def chat_stream(request: ChatRequest):
         try:
             # 调用 RAG Agent 的流式接口。
             # 这里不会等完整答案生成完，而是模型每产生一段内容就处理一段。
-            async for chunk in rag_agent_service.query_stream(request.question, session_id=request.id):
+            async for chunk in rag_agent_service.query_stream(
+                request.question, session_id=request.id
+            ):
                 chunk_type = chunk.get("type", "unknown")
                 chunk_data = chunk.get("data", None)
 
@@ -176,21 +173,23 @@ async def chat_stream(request: ChatRequest):
                     # {"type": "debug", "node": "...", "message_type": "..."}
                     yield {
                         "event": "message",
-                        "data": json.dumps({
-                            "type": "debug",
-                            "node": chunk.get("node", "unknown"),
-                            "message_type": chunk.get("message_type", "unknown")
-                        }, ensure_ascii=False)
+                        "data": json.dumps(
+                            {
+                                "type": "debug",
+                                "node": chunk.get("node", "unknown"),
+                                "message_type": chunk.get("message_type", "unknown"),
+                            },
+                            ensure_ascii=False,
+                        ),
                     }
                 elif chunk_type == "tool_call":
                     # 发送工具调用事件（可选，前端可以显示工具调用状态）
                     # 如果 Agent 暴露了工具调用过程，前端可以用这个事件展示“正在检索知识库”等状态。
                     yield {
                         "event": "message",
-                        "data": json.dumps({
-                            "type": "tool_call",
-                            "data": chunk_data
-                        }, ensure_ascii=False)
+                        "data": json.dumps(
+                            {"type": "tool_call", "data": chunk_data}, ensure_ascii=False
+                        ),
                     }
                 elif chunk_type == "search_results":
                     # 发送检索结果（可选，前端可以忽略）
@@ -199,10 +198,17 @@ async def chat_stream(request: ChatRequest):
                     # 所以这个分支是为扩展预留的。
                     yield {
                         "event": "message",
-                        "data": json.dumps({
-                            "type": "search_results",
-                            "data": chunk_data
-                        }, ensure_ascii=False)
+                        "data": json.dumps(
+                            {"type": "search_results", "data": chunk_data}, ensure_ascii=False
+                        ),
+                    }
+                elif chunk_type == "sources":
+                    # 发送引用来源（命中的知识片段），前端用于展示引用来源和反馈关联
+                    yield {
+                        "event": "message",
+                        "data": json.dumps(
+                            {"type": "sources", "data": chunk_data}, ensure_ascii=False
+                        ),
                     }
                 elif chunk_type == "content":
                     # 发送内容块 - 关键：data 必须是 JSON 字符串
@@ -210,10 +216,9 @@ async def chat_stream(request: ChatRequest):
                     # 前端一般会把每个 content.data 追加到当前回答文本后面。
                     yield {
                         "event": "message",
-                        "data": json.dumps({
-                            "type": "content",
-                            "data": chunk_data
-                        }, ensure_ascii=False)
+                        "data": json.dumps(
+                            {"type": "content", "data": chunk_data}, ensure_ascii=False
+                        ),
                     }
                 elif chunk_type == "complete":
                     # 发送完成信号
@@ -221,20 +226,18 @@ async def chat_stream(request: ChatRequest):
                     # 前端收到 done 后，可以停止 loading 状态。
                     yield {
                         "event": "message",
-                        "data": json.dumps({
-                            "type": "done",
-                            "data": chunk_data
-                        }, ensure_ascii=False)
+                        "data": json.dumps(
+                            {"type": "done", "data": chunk_data}, ensure_ascii=False
+                        ),
                     }
                 elif chunk_type == "error":
                     # 发送错误信息
                     # Agent 流式过程中出错时，会通过 SSE 发给前端。
                     yield {
                         "event": "message",
-                        "data": json.dumps({
-                            "type": "error",
-                            "data": str(chunk_data)
-                        }, ensure_ascii=False)
+                        "data": json.dumps(
+                            {"type": "error", "data": str(chunk_data)}, ensure_ascii=False
+                        ),
                     }
 
             logger.info(f"[会话 {request.id}] 流式对话完成")
@@ -245,10 +248,7 @@ async def chat_stream(request: ChatRequest):
             # 避免前端一直等待流结束。
             yield {
                 "event": "message",
-                "data": json.dumps({
-                    "type": "error",
-                    "data": str(e)
-                }, ensure_ascii=False)
+                "data": json.dumps({"type": "error", "data": str(e)}, ensure_ascii=False),
             }
 
     # EventSourceResponse 会把 async generator 包装成 text/event-stream 响应。
@@ -258,7 +258,7 @@ async def chat_stream(request: ChatRequest):
 
 @router.post("/chat/clear", response_model=ApiResponse)
 async def clear_session(request: ClearRequest):
-    """清空会话历史
+    """清空会话历史.
 
     请求示例：
     POST /chat/clear
@@ -284,12 +284,12 @@ async def clear_session(request: ClearRequest):
         return ApiResponse(
             status="success" if success else "error",
             message="会话已清空" if success else "清空会话失败",
-            data=None
+            data=None,
         )
 
     except Exception as e:
         logger.error(f"清空会话错误: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/chat/sessions", response_model=ChatSessionListResponse)
@@ -300,12 +300,12 @@ async def list_chat_sessions(limit: int = 50) -> ChatSessionListResponse:
         return ChatSessionListResponse(total=len(sessions), sessions=sessions)
     except Exception as e:
         logger.error(f"获取会话列表错误: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/chat/session/{session_id}", response_model=SessionInfoResponse)
 async def get_session_info(session_id: str) -> SessionInfoResponse:
-    """查询会话历史
+    """查询会话历史.
 
     请求示例：
     GET /chat/session/user-123
@@ -331,11 +331,9 @@ async def get_session_info(session_id: str) -> SessionInfoResponse:
         history = await rag_agent_service.get_session_history_async(session_id)
 
         return SessionInfoResponse(
-            session_id=session_id,
-            message_count=len(history),
-            history=history
+            session_id=session_id, message_count=len(history), history=history
         )
 
     except Exception as e:
         logger.error(f"获取会话信息错误: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

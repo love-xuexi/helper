@@ -35,24 +35,28 @@ class Settings(BaseSettings):
     chat_api_key: str = ""
     chat_base_url: str = ""
     chat_model: str = ""
-    embedding_api_key: str = ""
-    embedding_base_url: str = ""
-    embedding_model: str = ""
-    embedding_dimensions: int = 1024
-    embedding_encoding_format: str = "float"
-    embedding_max_tokens: int = 8192
-    embedding_token_safety_margin: int = 128
 
     # DashScope 旧配置
     dashscope_api_key: str = ""  # 默认空字符串，实际使用需从环境变量加载
     dashscope_api_base: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     dashscope_model: str = "qwen-max"
-    dashscope_embedding_model: str = "text-embedding-v4"  # v4 支持多种维度（默认 1024）
 
-    # Milvus 配置
-    milvus_host: str = "localhost"
-    milvus_port: int = 19530
-    milvus_timeout: int = 10000  # 毫秒
+    # 知识库平台 API 配置（内网）
+    # 知识库的建立/解析/向量化/混合检索/重排均由知识库平台完成，本服务只调用其接口
+    kb_api_token: str = ""  # Bearer Token，形如 kbmp-xxxx
+    kb_doc_base_url: str = "http://10.8.192.79:5353"  # 文档检索 / 上传
+    kb_mgmt_base_url: str = "http://10.8.192.79:5354"  # 知识库管理（列表/文档/指定检索）
+    kb_faq_base_url: str = "http://10.8.192.79:6000"  # FAQ 问答库检索
+    kb_botcode: str = ""  # 机器人编码
+    kb_faq_channel: str = ""  # FAQ 渠道
+    kb_upload_kb_id: str = ""  # 文件上传的默认目标知识库 ID（留空则取知识库列表第一个）
+    kb_timeout_seconds: float = 30.0
+    kb_max_chunks: int = 5  # 传给 LLM 的最相关片段数量（3-5）
+    kb_min_similarity: float = 0.0  # 相似度过滤阈值（0 表示不过滤）
+
+    # 反馈评价系统配置
+    feedback_db_path: str = "data/feedback.db"  # 本地 SQLite 存储
+    feedback_api_url: str = ""  # 可选：内网反馈入库接口，配置后反馈会同步转发
 
     # 会话持久化配置
     session_checkpoint_backend: str = "memory"
@@ -62,23 +66,7 @@ class Settings(BaseSettings):
     postgres_connect_timeout_seconds: float = 10.0
 
     # RAG 配置
-    rag_top_k: int = 3
-    rag_candidate_top_k: int = 20
     rag_model: str = ""  # 使用快速响应模型，不带扩展思考
-
-    # Rerank 配置
-    rerank_enabled: bool = True
-    rerank_model: str = "BAAI/bge-reranker-v2-m3"
-    rerank_api_key: str = ""
-    rerank_base_url: str = ""
-    rerank_provider: str = ""
-    rerank_timeout_seconds: float = 30.0
-    nvidia_api_key: str = ""
-    nvidia_base_url: str = ""
-
-    # 文档分块配置
-    chunk_max_size: int = 800
-    chunk_overlap: int = 100
 
     # MCP 服务配置
     mcp_cls_transport: str = "streamable-http"
@@ -137,40 +125,6 @@ class Settings(BaseSettings):
         if self.effective_chat_provider == "deepseek":
             return "deepseek-chat"
         return self.dashscope_model
-
-    @property
-    def effective_embedding_api_key(self) -> str:
-        return self.embedding_api_key or self.dashscope_api_key
-
-    @property
-    def effective_embedding_base_url(self) -> str:
-        return self.embedding_base_url or self.dashscope_api_base
-
-    @property
-    def effective_embedding_model(self) -> str:
-        return self.embedding_model or self.dashscope_embedding_model
-
-    @property
-    def effective_embedding_dimensions(self) -> int | None:
-        return self.embedding_dimensions if self.embedding_dimensions > 0 else None
-
-    @property
-    def effective_rerank_api_key(self) -> str:
-        return self.rerank_api_key or self.nvidia_api_key
-
-    @property
-    def effective_rerank_base_url(self) -> str:
-        return self.rerank_base_url or self.nvidia_base_url
-
-    @property
-    def effective_rerank_provider(self) -> str:
-        if self.rerank_provider:
-            return self.rerank_provider
-        if self.rerank_base_url or self.rerank_api_key:
-            return "openai_compatible"
-        if self.nvidia_base_url or self.nvidia_api_key:
-            return "nvidia"
-        return "openai_compatible"
 
 
 # 全局配置实例
