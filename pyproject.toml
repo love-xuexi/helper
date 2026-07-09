@@ -19,7 +19,6 @@ dependencies = [
     "psycopg[binary,pool]>=3.2.0",
     "dashscope>=1.14.0",
     "openai>=1.10.0",
-    "pymilvus>=2.3.5",
     "pydantic>=2.5.0,<3.0.0",
     "pydantic-settings>=2.1.0",
     "httpx>=0.26.0",
@@ -28,8 +27,6 @@ dependencies = [
     "python-multipart>=0.0.6",
     "loguru>=0.7.2",
     "python-dotenv>=1.0.0",
-    "langchain-milvus>=0.3.3",
-    "langchain-text-splitters>=1.1.0",
     "langchain-mcp-adapters>=0.2.1",
     "fastmcp>=2.14.0",
     "langchain-qwq>=0.3.4",
@@ -167,7 +164,7 @@ strict_equality = true
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["dashscope.*", "langchain.*", "pymilvus.*"]
+module = ["dashscope.*", "langchain.*"]
 ignore_missing_imports = true
 
 [tool.bandit]

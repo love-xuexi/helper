@@ -1136,30 +1136,249 @@ body {
     .sidebar {
         width: 240px;
     }
-    
+
     .message-content {
         max-width: 90%;
         font-size: 0.9rem;
     }
-    
+
     .input-wrapper {
         flex-wrap: wrap;
     }
-    
+
     .mode-selector-wrapper {
         order: -1;
         width: 100%;
         margin-left: 0;
         margin-bottom: 8px;
     }
-    
+
     .mode-selector-btn {
         width: 100%;
         justify-content: space-between;
     }
-    
+
     .mode-dropdown {
         width: 100%;
         right: 0;
     }
+}
+
+/* ============ 引用来源展示 ============ */
+.message-sources {
+    margin-top: 8px;
+}
+
+.sources-toggle {
+    background: none;
+    border: 1px solid #dadce0;
+    border-radius: 16px;
+    padding: 4px 12px;
+    font-size: 12px;
+    color: #5f6368;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.sources-toggle:hover {
+    background-color: #f1f3f4;
+}
+
+.sources-arrow {
+    margin-left: 4px;
+}
+
+.sources-list {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.source-item {
+    border: 1px solid #e8eaed;
+    border-radius: 8px;
+    padding: 10px 12px;
+    background-color: #f8f9fa;
+    font-size: 13px;
+}
+
+.source-item-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.source-index {
+    font-weight: 600;
+    color: #1a73e8;
+}
+
+.source-doc-name {
+    font-weight: 500;
+    color: #202124;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.source-similarity {
+    margin-left: auto;
+    font-size: 12px;
+    color: #5f6368;
+    flex-shrink: 0;
+}
+
+.source-item-content {
+    color: #5f6368;
+    line-height: 1.5;
+    word-break: break-word;
+}
+
+/* ============ 点赞/不喜欢反馈按钮 ============ */
+.message-actions {
+    display: flex;
+    gap: 4px;
+    margin-top: 6px;
+}
+
+.feedback-btn {
+    background: none;
+    border: none;
+    border-radius: 6px;
+    padding: 5px 7px;
+    cursor: pointer;
+    color: #9aa0a6;
+    display: flex;
+    align-items: center;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.feedback-btn:hover:not(:disabled) {
+    background-color: #f1f3f4;
+    color: #5f6368;
+}
+
+.feedback-btn.active {
+    color: #1a73e8;
+}
+
+.feedback-btn:disabled {
+    cursor: default;
+    opacity: 0.7;
+}
+
+/* ============ 结构化负反馈弹窗 ============ */
+.feedback-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(32, 33, 36, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10001;
+}
+
+.feedback-modal {
+    background: #fff;
+    border-radius: 12px;
+    padding: 20px;
+    width: 90%;
+    max-width: 480px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+.feedback-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 16px;
+    font-weight: 600;
+    color: #202124;
+    margin-bottom: 14px;
+}
+
+.feedback-modal-close {
+    background: none;
+    border: none;
+    font-size: 22px;
+    line-height: 1;
+    color: #9aa0a6;
+    cursor: pointer;
+}
+
+.feedback-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.feedback-tag {
+    border: 1px solid #dadce0;
+    background: #fff;
+    border-radius: 16px;
+    padding: 6px 14px;
+    font-size: 13px;
+    color: #3c4043;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.feedback-tag:hover {
+    background-color: #f1f3f4;
+}
+
+.feedback-tag.selected {
+    background-color: #e8f0fe;
+    border-color: #1a73e8;
+    color: #1a73e8;
+}
+
+.feedback-comment {
+    width: 100%;
+    border: 1px solid #dadce0;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 13px;
+    resize: vertical;
+    box-sizing: border-box;
+    font-family: inherit;
+}
+
+.feedback-comment:focus {
+    outline: none;
+    border-color: #1a73e8;
+}
+
+.feedback-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.feedback-cancel-btn {
+    background: none;
+    border: 1px solid #dadce0;
+    border-radius: 8px;
+    padding: 8px 18px;
+    font-size: 13px;
+    color: #5f6368;
+    cursor: pointer;
+}
+
+.feedback-submit-btn {
+    background-color: #1a73e8;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 18px;
+    font-size: 13px;
+    color: #fff;
+    cursor: pointer;
+}
+
+.feedback-submit-btn:hover {
+    background-color: #1765cc;
 }
