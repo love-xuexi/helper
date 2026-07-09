@@ -1,14 +1,15 @@
-"""配置管理模块
+"""配置管理模块.
 
 使用 Pydantic Settings 实现类型安全的配置管理
 """
 
-from typing import Any, Dict
+from typing import Any
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """应用配置"""
+    """应用配置."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -21,10 +22,16 @@ class Settings(BaseSettings):
     app_name: str = "SuperBizAgent"
     app_version: str = "1.0.0"
     debug: bool = False
-    host: str = "0.0.0.0"
+    host: str = "0.0.0.0"  # nosec B104 - 服务默认监听所有网卡，可用 HOST 环境变量覆盖
     port: int = 9900
 
-    # OpenAI 兼容模型配置
+    # Chat 模型配置
+    # chat_provider 决定使用哪种 LangChain 接口：
+    #   deepseek -> langchain_deepseek.ChatDeepSeek
+    #   qwen     -> langchain_qwq.ChatQwen
+    #   openai   -> langchain_openai.ChatOpenAI（OpenAI 兼容，兜底）
+    # 留空则根据 base_url / model 自动推断，无法识别时回退到 openai 兼容模式。
+    chat_provider: str = ""
     chat_api_key: str = ""
     chat_base_url: str = ""
     chat_model: str = ""
@@ -84,8 +91,8 @@ class Settings(BaseSettings):
         return self.session_checkpoint_backend.lower() == "postgres"
 
     @property
-    def mcp_servers(self) -> Dict[str, Dict[str, Any]]:
-        """获取完整的 MCP 服务器配置"""
+    def mcp_servers(self) -> dict[str, dict[str, Any]]:
+        """获取完整的 MCP 服务器配置."""
         return {
             "cls": {
                 "transport": self.mcp_cls_transport,
@@ -94,8 +101,20 @@ class Settings(BaseSettings):
             "monitor": {
                 "transport": self.mcp_monitor_transport,
                 "url": self.mcp_monitor_url,
-            }
+            },
         }
+
+    @property
+    def effective_chat_provider(self) -> str:
+        """返回 chat 模型接口类型；未显式配置时根据 base_url / model 推断，兜底 openai。"""
+        if self.chat_provider:
+            return self.chat_provider.strip().lower()
+        haystack = f"{self.chat_base_url} {self.chat_model}".lower()
+        if "deepseek" in haystack:
+            return "deepseek"
+        if "dashscope" in haystack or "aliyuncs" in haystack or "qwen" in haystack:
+            return "qwen"
+        return "openai"
 
     @property
     def effective_chat_api_key(self) -> str:
