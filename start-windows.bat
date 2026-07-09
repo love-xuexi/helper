@@ -5,11 +5,11 @@ set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
 
 echo ====================================
-echo Starting SuperBizAgent services
+echo Starting Smart QA Assistant
 echo ====================================
 echo.
 
-echo [1/9] Checking package manager...
+echo [1/7] Checking package manager...
 where uv >nul 2>&1
 if errorlevel 1 (
     echo [INFO] uv.exe was not found. pip fallback will be used.
@@ -21,7 +21,7 @@ if errorlevel 1 (
 )
 echo.
 
-echo [2/9] Checking .python-version...
+echo [2/7] Checking .python-version...
 set "PYTHON_VERSION="
 if exist ".python-version" (
     set /p PYTHON_VERSION=<".python-version"
@@ -35,7 +35,7 @@ if "!PYTHON_VERSION!"=="" (
 )
 echo.
 
-echo [3/9] Creating or updating virtual environment...
+echo [3/7] Creating or updating virtual environment...
 if not exist ".venv\Scripts\python.exe" (
     echo [INFO] Creating a new virtual environment...
     if "%USE_UV%"=="1" (
@@ -69,7 +69,7 @@ if not exist "%PYTHON_CMD%" (
 echo [OK] Virtual environment is available.
 echo.
 
-echo [4/9] Checking virtual environment Python version...
+echo [4/7] Checking virtual environment Python version...
 "%PYTHON_CMD%" -c "import sys; raise SystemExit(0 if (3, 11) <= sys.version_info[:2] < (3, 14) else 1)"
 if errorlevel 1 (
     echo [ERROR] This project requires Python 3.11, 3.12, or 3.13.
@@ -80,7 +80,7 @@ if errorlevel 1 (
 "%PYTHON_CMD%" --version
 echo.
 
-echo [5/9] Installing or updating dependencies...
+echo [5/7] Installing or updating dependencies...
 "%PYTHON_CMD%" -m pip --version >nul 2>&1
 if errorlevel 1 (
     echo [INFO] pip was not found in the virtual environment. Bootstrapping pip...
@@ -107,66 +107,30 @@ if errorlevel 1 (
 echo [OK] Dependencies are ready.
 echo.
 
-echo [6/9] Checking application configuration...
-"%PYTHON_CMD%" -c "from app.config import config; print('Config OK')"
+echo [6/7] Checking application configuration...
+"%PYTHON_CMD%" -c "from app.config import config; print('Config OK')" >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] Application configuration check failed.
     echo [TIP] Check .env values. DEBUG must be true or false.
     goto :fail
 )
+echo [OK] Configuration is valid.
 echo.
 
-echo [7/9] Starting Milvus vector database...
-where docker >nul 2>&1
-if errorlevel 1 (
-    echo [ERROR] Docker was not found in PATH.
-    echo [TIP] Install and start Docker Desktop first.
-    goto :fail
-)
-docker ps --format "{{.Names}}" | findstr /C:"milvus-standalone" >nul 2>&1
-if not errorlevel 1 (
-    echo [INFO] Milvus is already running.
-) else (
-    docker compose -f vector-database.yml up -d
-    if errorlevel 1 (
-        echo [ERROR] Docker Compose startup failed.
-        echo [TIP] Make sure Docker Desktop is running.
-        goto :fail
-    )
-    echo [INFO] Waiting for Milvus startup...
-    timeout /t 10 /nobreak >nul
-)
-echo [OK] Milvus is ready.
-echo.
-
-echo [8/9] Starting MCP services...
-start "CLS MCP Server" /min cmd /c ""%PYTHON_CMD%" "mcp_servers\cls_server.py" > "mcp_cls.log" 2>&1"
-timeout /t 2 /nobreak >nul
-start "Monitor MCP Server" /min cmd /c ""%PYTHON_CMD%" "mcp_servers\monitor_server.py" > "mcp_monitor.log" 2>&1"
-timeout /t 2 /nobreak >nul
-echo [OK] MCP startup commands were sent.
-echo.
-
-echo [9/9] Starting FastAPI service...
+echo [7/7] Starting FastAPI service...
 type nul > "server.log"
-start "SuperBizAgent API" cmd /c ""%PYTHON_CMD%" -m app.run_server > "server.log" 2>&1"
+start "SmartQA API" cmd /c ""%PYTHON_CMD%" -m app.run_server > "server.log" 2>&1"
 timeout /t 2 /nobreak >nul
-start "SuperBizAgent Logs" powershell -NoProfile -ExecutionPolicy Bypass -NoExit -Command "$Host.UI.RawUI.WindowTitle='SuperBizAgent Logs'; Get-Content -Path 'server.log' -Wait -Tail 80 -Encoding UTF8"
+start "SmartQA Logs" powershell -NoProfile -ExecutionPolicy Bypass -NoExit -Command "$Host.UI.RawUI.WindowTitle='SmartQA Logs'; Get-Content -Path 'server.log' -Wait -Tail 80 -Encoding UTF8"
 echo [INFO] Waiting for API startup...
-timeout /t 15 /nobreak >nul
+timeout /t 8 /nobreak >nul
 
 echo [INFO] Checking API health...
-curl -s http://localhost:9900/health >nul 2>&1
+curl -s http://localhost:9900/api/health >nul 2>&1
 if errorlevel 1 (
     echo [WARN] API did not respond yet. Check server.log and logs\app_*.log.
 ) else (
     echo [OK] FastAPI is healthy.
-    echo [INFO] Uploading aiops-docs files...
-    for %%f in (aiops-docs\*.md) do (
-        echo   Uploading: %%~nxf
-        curl -s -X POST http://localhost:9900/api/upload -F "file=@%%f" >nul 2>&1
-    )
-    echo [OK] Document upload finished.
 )
 
 echo.
@@ -187,12 +151,14 @@ echo.
 echo Logs:
 echo   - FastAPI process: server.log
 echo   - FastAPI app: logs\app_*.log
-echo   - CLS MCP: mcp_cls.log
-echo   - Monitor MCP: mcp_monitor.log
 echo.
 echo View live FastAPI logs:
 echo   powershell -NoProfile -Command "Get-Content -Path server.log -Wait -Tail 80 -Encoding UTF8"
 echo Stop services: stop-windows.bat
+echo.
+echo [NOTE] Knowledge base API must be reachable at the configured internal addresses.
+echo [NOTE] MCP services (AIOps) are optional and not started by default.
+echo   To start MCP: python mcp_servers\cls_server.py and python mcp_servers\monitor_server.py
 echo ====================================
 goto :done
 

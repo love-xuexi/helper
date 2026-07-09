@@ -1,64 +1,76 @@
 """健康检查接口"""
 
 from typing import Any
+
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from app.config import config
-from app.core.milvus_client import milvus_manager
 from loguru import logger
+
+from app.config import config
+from app.services.feedback_service import feedback_service
+from app.services.kb_api_client import kb_api_client
 
 router = APIRouter()
 
 
 @router.get("/health")
 async def health_check():
-    
     """健康检查接口
-    检查服务状态和数据库连接状态
-    
-    Returns:
-        JSONResponse: 健康检查结果
+
+    检查项：
+    - 服务基本状态
+    - 知识库 API 连通性
+    - 反馈数据库可用性
     """
-    # 检查服务基本状态
-    health_data: dict[str, Any] = {  # pyright: ignore[reportExplicitAny]
+    import asyncio
+
+    health_data: dict[str, Any] = {
         "service": config.app_name,
         "version": config.app_version,
-        "status": "healthy"
+        "status": "healthy",
     }
-    
-    # 检查 Milvus 连接状态
+
+    # 检查知识库 API
     try:
-        milvus_healthy = milvus_manager.health_check()
-        milvus_status: str = "connected" if milvus_healthy else "disconnected"
-        milvus_message: str = "Milvus 连接正常" if milvus_healthy else "Milvus 连接异常"
-        health_data["milvus"] = {
-            "status": milvus_status,
-            "message": milvus_message
+        kb_healthy = await kb_api_client.health_check()
+        health_data["kb_api"] = {
+            "status": "connected" if kb_healthy else "disconnected",
+            "message": "知识库 API 连接正常" if kb_healthy else "知识库 API 不可达",
         }
     except Exception as e:
-        logger.warning(f"Milvus 健康检查失败: {e}")
-        health_data["milvus"] = {
-            "status": "error",
-            "message": f"Milvus 检查失败: {str(e)}"
+        logger.warning(f"知识库 API 健康检查失败: {e}")
+        health_data["kb_api"] = {"status": "error", "message": f"知识库 API 检查失败: {str(e)}"}
+
+    # 检查反馈数据库
+    try:
+        stats = feedback_service.get_stats()
+        health_data["feedback_db"] = {
+            "status": "ok" if stats is not None else "error",
+            "message": f"反馈数据库正常（共 {stats['total']} 条记录）",
         }
-    
-    # 判断整体健康状态
+    except Exception as e:
+        logger.warning(f"反馈数据库健康检查失败: {e}")
+        health_data["feedback_db"] = {"status": "error", "message": f"反馈数据库检查失败: {str(e)}"}
+
+    # 判断整体健康状态（知识库 API 不可用不阻断服务，仅降级）
     overall_status = "healthy"
     status_code = 200
-    
-    # 如果 Milvus 不可用，服务不可用
-    if health_data["milvus"]["status"] != "connected":
-        overall_status = "unhealthy"
-        status_code = 503
-        health_data["error"] = "数据库不可用"
-    
+
+    if health_data["feedback_db"]["status"] != "ok":
+        overall_status = "degraded"
+        health_data["error"] = "反馈数据库不可用"
+
+    if health_data["kb_api"]["status"] != "connected":
+        overall_status = "degraded"
+        health_data["error"] = "知识库 API 不可达，RAG 检索将不可用"
+
     health_data["status"] = overall_status
-    
+
     return JSONResponse(
         status_code=status_code,
         content={
             "code": status_code,
-            "message": "服务运行正常" if overall_status == "healthy" else "服务不可用",
-            "data": health_data
-        }
+            "message": "服务运行正常" if overall_status == "healthy" else "服务降级运行",
+            "data": health_data,
+        },
     )

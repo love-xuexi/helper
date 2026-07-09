@@ -61,7 +61,38 @@ class Settings(BaseSettings):
     postgres_pool_max_size: int = 5
     postgres_connect_timeout_seconds: float = 10.0
 
-    # RAG 配置
+    # ---- 知识库 API 配置（内网接口，RAG 检索直接调用） ----
+    # 文档检索/上传地址（端口 5353）
+    kb_retrieval_base_url: str = "http://10.8.192.79:5353"
+    # 知识库管理地址（端口 5354）
+    kb_management_base_url: str = "http://10.8.192.79:5354"
+    # FAQ 检索地址（端口 6000）
+    kb_faq_base_url: str = "http://10.8.192.79:6000"
+    # 统一鉴权 Token
+    kb_api_token: str = "kbmp-i94DZSu3_pUMxcA0seYAe-Hcod3_EJRf"
+    # 文档检索用的 botcode
+    kb_botcode: str = "25d4c12e46834cc39bc211b84a9b2462"
+    # FAQ 检索用的 botcode
+    kb_faq_botcode: str = "a2a45e52569f48ac9a2a2ca1d1e2718c"
+    # FAQ 渠道
+    kb_faq_channel: str = "1"
+    # 默认检索的知识库 ID 列表（逗号分隔，留空则使用 botcode 关联的默认库）
+    kb_default_kb_ids: str = ""
+    # 检索返回的片段数量上限
+    kb_top_k: int = 5
+    # 检索相似度阈值（低于此值的片段将被过滤）
+    kb_similarity_threshold: float = 0.3
+    # KB API 请求超时（秒）
+    kb_timeout_seconds: float = 30.0
+
+    # ---- 反馈系统配置 ----
+    # 反馈数据库路径（SQLite）
+    feedback_db_path: str = "./data/feedback.db"
+    # 可选：反馈数据外部推送 API（留空则仅本地存储）
+    feedback_external_api_url: str = ""
+    feedback_external_api_token: str = ""
+
+    # RAG 配置（保留兼容旧配置，实际检索改用 KB API）
     rag_top_k: int = 3
     rag_candidate_top_k: int = 20
     rag_model: str = ""  # 使用快速响应模型，不带扩展思考
@@ -89,6 +120,18 @@ class Settings(BaseSettings):
     @property
     def is_postgres_checkpoint_enabled(self) -> bool:
         return self.session_checkpoint_backend.lower() == "postgres"
+
+    @property
+    def kb_default_kb_id_list(self) -> list[str]:
+        """将 kb_default_kb_ids 字符串解析为列表。"""
+        if not self.kb_default_kb_ids.strip():
+            return []
+        return [s.strip() for s in self.kb_default_kb_ids.split(",") if s.strip()]
+
+    @property
+    def kb_auth_header(self) -> dict[str, str]:
+        """获取知识库 API 鉴权请求头。"""
+        return {"Authorization": f"Bearer {self.kb_api_token}"}
 
     @property
     def mcp_servers(self) -> dict[str, dict[str, Any]]:
