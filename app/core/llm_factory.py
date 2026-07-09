@@ -1,25 +1,28 @@
-"""LLM 工厂类
+"""LLM 工厂类.
 
-使用 LangChain ChatOpenAI 通过 OpenAI 兼容模式调用阿里云 DashScope
-这种方式便于后续切换到其他支持 OpenAI API 的模型提供商
+使用 LangChain 官方的 DeepSeek 接口 (langchain_deepseek.ChatDeepSeek) 调用 DeepSeek 模型。
 
-支持的模型提供商（只需修改 base_url 和 api_key）：
-- 阿里云 DashScope: https://dashscope.aliyuncs.com/compatible-mode/v1
-- OpenAI: https://api.openai.com/v1
-- Azure OpenAI: https://{resource}.openai.azure.com
-- 其他兼容 OpenAI API 的服务
+ChatDeepSeek 继承自 BaseChatOpenAI，兼容 with_structured_output / bind_tools / 流式输出，
+同时针对 DeepSeek API 做了专门适配（如 reasoning_content、tool 消息格式等）。
+
+默认接入 DeepSeek 官方服务：
+- Base URL: https://api.deepseek.com/v1
+- 常用模型: deepseek-chat（对话）、deepseek-reasoner（推理）
+
+如需接入自建或第三方兼容 DeepSeek 的服务，只需通过配置修改 base_url / api_key。
 """
 
-from langchain_openai import ChatOpenAI
+from langchain_deepseek import ChatDeepSeek
+
 from app.config import config
-from loguru import logger
 
 
 class LLMFactory:
-    """LLM 工厂类 - 使用 OpenAI 兼容模式"""
+    """LLM 工厂类 - 使用 LangChain 官方 DeepSeek 接口"""
 
-    # 阿里云 DashScope OpenAI 兼容模式 URL
-    DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    # DeepSeek 官方 API 默认值
+    DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
+    DEEPSEEK_DEFAULT_MODEL = "deepseek-chat"
 
     def __init__(self, settings=None):
         self.settings = settings or config
@@ -31,25 +34,22 @@ class LLMFactory:
         streaming: bool = True,
         base_url: str | None = None,
         api_key: str | None = None,
-    ) -> ChatOpenAI:
-        model = model or self.settings.effective_chat_model
-        base_url = base_url or self.settings.effective_chat_base_url or LLMFactory.DASHSCOPE_BASE_URL
+    ) -> ChatDeepSeek:
+        model = model or self.settings.effective_chat_model or LLMFactory.DEEPSEEK_DEFAULT_MODEL
+        base_url = base_url or self.settings.effective_chat_base_url or LLMFactory.DEEPSEEK_BASE_URL
         api_key = api_key or self.settings.effective_chat_api_key
 
-        # 参考：https://help.aliyun.com/zh/model-studio/getting-started/models
-        extra_body = {}
-        extra_body["stream"] = streaming
-
-        llm = ChatOpenAI(
+        # ChatDeepSeek 的 base_url 字段别名为 api_base，这里用 base_url 传入即可。
+        llm = ChatDeepSeek(
             model=model,
             temperature=temperature,
             streaming=streaming,
             base_url=base_url,
             api_key=api_key,
-            extra_body=extra_body if extra_body else None,
         )
 
         return llm
+
 
 # 全局 LLM 工厂实例
 llm_factory = LLMFactory()
