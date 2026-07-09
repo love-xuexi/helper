@@ -35,16 +35,6 @@ class ChatProvider(str, Enum):
 class LLMFactory:
     """LLM 工厂类 - OpenAI 兼容兜底 + 专用模型接口路由。"""
 
-    DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
-    DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-
-    # 各 provider 未显式配置时的默认 (base_url, model)
-    _PROVIDER_DEFAULTS: dict[ChatProvider, tuple[str, str]] = {
-        ChatProvider.DEEPSEEK: (DEEPSEEK_BASE_URL, "deepseek-chat"),
-        ChatProvider.QWEN: (DASHSCOPE_BASE_URL, "qwen-max"),
-        ChatProvider.OPENAI: (DASHSCOPE_BASE_URL, "qwen-max"),
-    }
-
     def __init__(self, settings=None):
         self.settings = settings or config
 
@@ -66,10 +56,11 @@ class LLMFactory:
         provider: str | None = None,
     ) -> BaseChatModel:
         chat_provider = self._resolve_provider(provider)
-        default_base, default_model = LLMFactory._PROVIDER_DEFAULTS[chat_provider]
 
-        model = model or self.settings.chat_model or self.settings.rag_model or default_model
-        base_url = base_url or self.settings.chat_base_url or default_base
+        # effective_* 已按 provider 处理默认值：DeepSeek 用官方地址/deepseek-chat，
+        # openai/qwen 沿用 DashScope 旧配置兜底，从而保持向后兼容。
+        model = model or self.settings.effective_chat_model
+        base_url = base_url or self.settings.effective_chat_base_url
         api_key = api_key or self.settings.effective_chat_api_key
 
         if chat_provider is ChatProvider.DEEPSEEK:

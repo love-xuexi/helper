@@ -122,11 +122,21 @@ class Settings(BaseSettings):
 
     @property
     def effective_chat_base_url(self) -> str:
-        return self.chat_base_url or self.dashscope_api_base
+        # 显式配置优先；DeepSeek 用官方地址，其余（openai/qwen）沿用 DashScope 旧配置兜底
+        if self.chat_base_url:
+            return self.chat_base_url
+        if self.effective_chat_provider == "deepseek":
+            return "https://api.deepseek.com/v1"
+        return self.dashscope_api_base
 
     @property
     def effective_chat_model(self) -> str:
-        return self.chat_model or self.rag_model or self.dashscope_model
+        # 显式配置优先；DeepSeek 默认 deepseek-chat，其余（openai/qwen）沿用 DashScope 旧配置兜底
+        if self.chat_model or self.rag_model:
+            return self.chat_model or self.rag_model
+        if self.effective_chat_provider == "deepseek":
+            return "deepseek-chat"
+        return self.dashscope_model
 
     @property
     def effective_embedding_api_key(self) -> str:

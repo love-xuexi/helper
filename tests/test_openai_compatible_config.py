@@ -99,6 +99,22 @@ def test_llm_factory_infers_deepseek_from_base_url():
     assert llm.model_name == "deepseek-reasoner"
 
 
+def test_llm_factory_honors_legacy_dashscope_config_via_openai_fallback():
+    # 仅配置旧版 DASHSCOPE_* 的用户应继续走 OpenAI 兼容并使用其自定义 model/endpoint
+    settings = make_settings(
+        dashscope_api_key="legacy-key",
+        dashscope_api_base="https://legacy.example.com/v1",
+        dashscope_model="qwen-legacy",
+    )
+
+    llm = LLMFactory(settings=settings).create_chat_model(streaming=False)
+
+    assert isinstance(llm, ChatOpenAI)
+    assert llm.model_name == "qwen-legacy"
+    assert str(llm.openai_api_base).rstrip("/") == "https://legacy.example.com/v1"
+    assert llm.openai_api_key.get_secret_value() == "legacy-key"
+
+
 def test_llm_factory_routes_to_qwen_when_provider_configured():
     settings = make_settings(
         chat_provider="qwen",
