@@ -15,6 +15,15 @@
 - 🌐 **Web 界面** - 现代化 UI（参考 ChatGPT/Claude），引用来源卡片展示、快速/流式对话、多格式文件上传
 - 🔌 **MCP 集成** - 日志查询和监控数据工具接入
 
+## 📖 文档导航
+
+| 文档                                                                                                       | 内容                                                                              |
+| ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| [docs/user-guide.md](docs/user-guide.md)                                                                   | 使用指南：Web 界面操作（引用来源卡片、反馈评价、文件上传、AIOps）与 API 调用示例  |
+| [docs/local-dev-guide.md](docs/local-dev-guide.md)                                                         | 本地联调手册：内网不可达时用 mock 知识库/LLM 服务跑通端到端链路、测试与上线前冒烟 |
+| [project-docs/project_overview.md](project-docs/project_overview.md)                                       | 架构总览：技术栈、核心链路、配置结构、风险与演进路线                              |
+| [.agents/skills/testing-helper-rag-feedback/SKILL.md](.agents/skills/testing-helper-rag-feedback/SKILL.md) | 引用来源 + 反馈 UI 回归测试步骤                                                   |
+
 ## 🛠️ 技术栈
 
 - **框架**: FastAPI + LangChain + LangGraph
@@ -180,7 +189,18 @@ curl -X POST "http://localhost:9900/api/aiops" \
   -H "Content-Type: application/json" \
   -d '{"session_id":"session-123"}' \
   --no-buffer
+
+# 提交反馈（rating: like / dislike；dislike 时可附 tags + comment）
+curl -X POST "http://localhost:9900/api/feedback" \
+  -H "Content-Type: application/json" \
+  -d '{"sessionId":"session-123","question":"CPU 飙高怎么排查？","answer":"可以先使用 top...","rating":"dislike","tags":["回答不准确"],"comment":"第 2 步命令写错了","chunkIds":["chunk-id-1"]}'
+
+# 查询反馈记录 / 统计
+curl "http://localhost:9900/api/feedback/list?limit=50&rating=dislike"
+curl "http://localhost:9900/api/feedback/stats"
 ```
+
+更多示例（知识库列表/FAQ 检索/文件上传等）见 [docs/user-guide.md](docs/user-guide.md)。
 
 ## 📁 项目结构
 
@@ -241,6 +261,8 @@ super_biz_agent_py/
 │   ├── monitor_server.py                   # 监控数据服务
 │   └── README.md                           # MCP 服务说明
 ├── aiops-docs/                             # 运维知识库（Markdown 文档）
+├── docs/                                   # 使用指南与本地联调手册
+├── scripts/dev/                            # 本地联调用 mock 服务（知识库平台 / LLM）
 ├── logs/                                   # 日志目录（Loguru 自动创建）
 │   └── app_YYYY-MM-DD.log                  # 按天轮转的日志文件
 ├── data/                                   # 本地数据目录（反馈 SQLite 库等，自动创建）
@@ -458,6 +480,7 @@ type .env | findstr API_KEY    # Windows
 # 2. 确认 KB_API_TOKEN 已配置且未过期（形如 kbmp-xxxx）
 # 3. 查看服务日志中的具体错误（logs/app_YYYY-MM-DD.log）
 # 检索失败时回答会降级为“无法基于当前知识库回答”，不会中断对话
+# 内网不可达的开发机可用本地 mock 联调，见 docs/local-dev-guide.md
 ```
 
 ### PostgreSQL 会话持久化启动失败
