@@ -57,6 +57,8 @@ notepad .env
 - **Web 界面**: http://localhost:9900
 - **API 文档**: http://localhost:9900/docs
 
+> 默认端口 `9900`（见 `app/config.py` 的 `port` 与 `.env` 的 `PORT`）。启动脚本会自动检查该端口的健康状态。如需修改端口，改 `PORT` 即可，无需改动脚本。
+
 ## 📡 API 接口
 
 ### 核心接口
@@ -69,15 +71,22 @@ notepad .env
 | 会话列表 | GET | `/api/chat/sessions` | 获取所有会话摘要 |
 | 会话历史 | GET | `/api/chat/session/{id}` | 获取指定会话消息 |
 | 提交反馈 | POST | `/api/feedback` | 点赞/不喜欢 + 结构化负反馈 |
-| 反馈列表 | GET | `/api/feedback` | 分页查询反馈 |
+| 反馈列表 | GET | `/api/feedback` | 分页查询，支持 `rating` 过滤、`limit`/`offset` 分页 |
 | 反馈统计 | GET | `/api/feedback/stats` | 点赞率、标签分布等 |
 | 负反馈标签 | GET | `/api/feedback/tags` | 获取预设负反馈选项 |
+| 反馈详情 | GET | `/api/feedback/{id}` | 获取单条反馈 |
+| 按消息查反馈 | GET | `/api/feedback/message/{message_id}` | 查询某条回答的反馈状态 |
+| 删除反馈 | DELETE | `/api/feedback/{id}` | 删除单条反馈 |
 | 知识库列表 | GET | `/api/knowledge-bases` | 列出所有知识库 |
 | 文档列表 | GET | `/api/knowledge-bases/{kb_id}/docs` | 指定知识库的文档 |
-| 上传文档 | POST | `/api/upload` | 上传文档到知识库 |
-| 健康检查 | GET | `/api/health` | 服务状态 + KB API 连通性 |
+| 上传文档 | POST | `/api/upload` | multipart 上传文档到知识库 |
+| 手动检索 | POST | `/api/kb/retrieve` | 调试用：直接检索知识库片段 |
+| 健康检查 | GET | `/api/health` | 服务状态 + KB API 连通性 + 反馈库 |
 
 ### 使用示例
+
+> 对话接口请求体字段使用 camelCase 别名：`Id`（会话 ID）、`Question`（用户问题）。
+> 反馈接口字段：`sessionId`、`messageId`、`rating`（`like`/`dislike`）、`feedbackTags`、`feedbackDescription`、`chunkIds`。
 
 ```bash
 # 流式对话
@@ -85,6 +94,11 @@ curl -X POST "http://localhost:9900/api/chat_stream" \
   -H "Content-Type: application/json" \
   -d '{"Id":"session-123","Question":"寿险投保规则是什么？"}' \
   --no-buffer
+
+# 上传文档到知识库（multipart）
+curl -X POST "http://localhost:9900/api/upload" \
+  -F "file=@docs/policy.pdf" \
+  -F "kbId=your-kb-id"
 
 # 提交反馈
 curl -X POST "http://localhost:9900/api/feedback" \
@@ -123,16 +137,33 @@ KB_BOTCODE=25d4c12e46834cc39bc211b84a9b2462
 ### 可选配置
 
 ```bash
+# 知识库检索参数
+# 默认检索的知识库 ID 列表（逗号分隔，留空则使用 botcode 关联的默认库）
+KB_DEFAULT_KB_IDS=
+# 检索返回的片段数量上限
+KB_TOP_K=5
+# 检索相似度阈值（低于此值的片段将被过滤）
+KB_SIMILARITY_THRESHOLD=0.3
+# KB API 请求超时（秒）
+KB_TIMEOUT_SECONDS=30
+# FAQ 检索用 botcode 与渠道
+KB_FAQ_BOTCODE=a2a45e52569f48ac9a2a2ca1d1e2718c
+KB_FAQ_CHANNEL=1
+
 # 反馈数据库路径（SQLite）
 FEEDBACK_DB_PATH=./data/feedback.db
 
-# 可选：反馈数据外部推送 API
+# 可选：反馈数据外部推送 API（留空则仅本地存储）
 FEEDBACK_EXTERNAL_API_URL=
 FEEDBACK_EXTERNAL_API_TOKEN=
 
 # 会话持久化（memory 或 postgres）
 SESSION_CHECKPOINT_BACKEND=memory
+# 当后端为 postgres 时使用
+POSTGRES_DSN=postgresql://superbiz:superbiz_dev@localhost:5432/super_biz_agent
 ```
+
+> 旧的 Milvus / Embedding / Rerank / 分块配置（`MILVUS_*`、`EMBEDDING_*`、`RERANK_*`、`CHUNK_*`）已不再使用，仅在 `.env.example` 中保留以便兼容，可忽略。
 
 ## 📁 项目结构
 
@@ -209,13 +240,22 @@ pyright app/
 
 ### 反馈数据查看
 
-反馈数据存储在 `./data/feedback.db`（SQLite），可直接查询：
+反馈数据存储在 `./data/feedback.db`（SQLite）。
+
+Windows 默认未安装 `sqlite3` 命令行工具，推荐使用项目自带的 Python 环境查询：
+
+```powershell
+# 查看所有反馈（最近 20 条）
+.\.venv\Scripts\python.exe -c "import sqlite3,json; c=sqlite3.connect('data/feedback.db'); c.row_factory=sqlite3.Row; rows=c.execute('SELECT id,rating,feedback_tags,feedback_description,created_at FROM feedback ORDER BY created_at DESC LIMIT 20').fetchall(); print(json.dumps([dict(r) for r in rows], ensure_ascii=False, indent=2))"
+
+# 查看统计（点赞 / 不喜欢 数量）
+.\.venv\Scripts\python.exe -c "import sqlite3; c=sqlite3.connect('data/feedback.db'); print(c.execute('SELECT rating, COUNT(*) FROM feedback GROUP BY rating').fetchall())"
+```
+
+若已安装 `sqlite3` 命令行工具，也可直接使用：
 
 ```bash
-# 查看所有反馈
 sqlite3 data/feedback.db "SELECT id, rating, feedback_tags, feedback_description, created_at FROM feedback ORDER BY created_at DESC LIMIT 20;"
-
-# 查看统计
 sqlite3 data/feedback.db "SELECT rating, COUNT(*) FROM feedback GROUP BY rating;"
 ```
 
