@@ -307,7 +307,6 @@ class RagAgentService:
         except Exception as e:
             logger.error(f"[会话 {session_id}] RAG 查询失败（流式）: {e}")
             yield {"type": "error", "data": str(e)}
-            raise
 
     # ----------------------------------------------------------------
     # 会话历史管理
