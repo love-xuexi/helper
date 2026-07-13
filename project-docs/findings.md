@@ -98,9 +98,9 @@ SuperBizAgent 是一个基于 FastAPI 的 Python Agent 项目，面向企业智�
 - 根因 1：`start-windows.bat` / `stop-windows.bat` 原先包含中文 UTF-8 文本且使用 LF 换行，在 Windows `cmd.exe` 代码页不一致时会把中文字节解析成类似 `鍔?...` 的乱码命令。
 - 根因 2：当前 `.python-version` 曾为空文件，启动脚本读取后不会得到有效 Python 版本。
 - 根因 3：当前 `.venv` 中缺少 `pip`，真实运行 `start-windows.bat` 时在依赖安装阶段报 `No module named pip`。
-- 根因 4：`stop-windows.bat` 原先只按窗口标题停止 FastAPI，但实际 Python 子进程窗口标题可能变成 `OleMainThreadWndName`，导致 9900 端口遗留监听。
-- 修复：Windows 批处理脚本改为英文 ASCII 输出并保持 CRLF；`start-windows.bat` 增加 `.python-version` 空值修复、Python 版本检查、`ensurepip` 兜底、配置检查和日志重定向；`stop-windows.bat` 增加按 9900/8003/8004 端口查 PID 并停止的兜底逻辑。
-- 验证：`start-windows.bat` 真实启动成功，Milvus/MCP/FastAPI 启动并且 `/health` 返回 200；`stop-windows.bat` 真实停止成功，最终 9900/8003/8004 监听数为 0，Milvus 运行容器数为 0。
+- 根因 4：`stop-windows.bat` 原先只按窗口标题停止 FastAPI，但实际 Python 子进程窗口标题可能变成 `OleMainThreadWndName`，导致 9983 端口遗留监听。
+- 修复：Windows 批处理脚本改为英文 ASCII 输出并保持 CRLF；`start-windows.bat` 增加 `.python-version` 空值修复、Python 版本检查、`ensurepip` 兜底、配置检查和日志重定向；`stop-windows.bat` 增加按 9983/8003/8004 端口查 PID 并停止的兜底逻辑。
+- 验证：`start-windows.bat` 真实启动成功，Milvus/MCP/FastAPI 启动并且 `/health` 返回 200；`stop-windows.bat` 真实停止成功，最终 9983/8003/8004 监听数为 0，Milvus 运行容器数为 0。
 - 注意：如果继续使用旧 DashScope 变量作为 Embedding 兜底，文档上传阶段仍会受该 API Key 有效性影响；这不影响 Windows 脚本可用性，但会影响知识库向量化。
 
 ## 2026-05-11 OpenAI-compatible 模型配置重构补充

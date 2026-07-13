@@ -43,8 +43,8 @@ Windows 推荐使用：
 
 1. Docker 启动 Milvus：`docker compose -f vector-database.yml up -d`
 2. 启动 MCP Server：`python mcp_servers/cls_server.py`、`python mcp_servers/monitor_server.py`
-3. 启动主服务：`python -m uvicorn app.main:app --host 0.0.0.0 --port 9900`
-4. 访问：`http://localhost:9900`
+3. 启动主服务：`python -m uvicorn app.main:app --host 0.0.0.0 --port 9983`
+4. 访问：`http://localhost:9983`
 
 ## 4. 目录职责
 

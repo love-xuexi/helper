@@ -4,7 +4,7 @@
 # ============================================================
 # 配置变量
 # ============================================================
-SERVER_URL = http://localhost:9900
+SERVER_URL = http://localhost:9983
 UPLOAD_API = $(SERVER_URL)/api/upload
 HEALTH_CHECK_API = $(SERVER_URL)/health
 DOCS_DIR = aiops-docs
@@ -312,7 +312,7 @@ start-api:
 		echo "$(GREEN)✅ FastAPI 服务已经在运行中 ($(SERVER_URL))$(NC)"; \
 	else \
 		echo "$(YELLOW)📦 正在启动 FastAPI 服务（后台运行）...$(NC)"; \
-		nohup .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 9900 > server.log 2>&1 & \
+		nohup .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 9983 > server.log 2>&1 & \
 		echo $$! > server.pid; \
 		echo "$(GREEN)✅ FastAPI 服务启动命令已执行$(NC)"; \
 		echo "$(YELLOW)   PID: $$(cat server.pid)$(NC)"; \
@@ -422,12 +422,12 @@ check:
 # 开发模式运行（前台，热重载）
 dev:
 	@echo "$(YELLOW)🔧 启动开发服务器（热重载）...$(NC)"
-	.venv/bin/python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 9900
+	.venv/bin/python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 9983
 
 # 生产模式运行（前台）
 run:
 	@echo "$(YELLOW)🏭 启动生产服务器...$(NC)"
-	.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 9900
+	.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 9983
 
 # ============================================================
 # 文档管理

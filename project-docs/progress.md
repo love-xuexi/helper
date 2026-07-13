@@ -53,13 +53,13 @@
 - 将 `start-windows.bat` / `stop-windows.bat` 改为英文 ASCII 输出并保留 Windows CRLF 换行。
 - 修复空 `.python-version`，当前内容为 `3.13`。
 - 在 `start-windows.bat` 中增加虚拟环境 `pip` 检查和 `ensurepip` 兜底。
-- 在 `stop-windows.bat` 中增加按端口 `9900`、`8003`、`8004` 查找并停止 PID 的兜底逻辑。
+- 在 `stop-windows.bat` 中增加按端口 `9983`、`8003`、`8004` 查找并停止 PID 的兜底逻辑。
 - 更新 README 的 Windows 启动说明、Python 版本要求和乱码 FAQ。
 
 ### 验证结果
 
 - 已真实运行 `cmd /c "set NO_PAUSE=1&& call start-windows.bat"`，退出码 `0`；Milvus/MCP/FastAPI 启动成功，FastAPI `/health` 返回 `200`。
-- 已真实运行 `cmd /c "set NO_PAUSE=1&& call stop-windows.bat"`，退出码 `0`；停止后 9900/8003/8004 监听数为 0，Milvus 运行容器数为 0。
+- 已真实运行 `cmd /c "set NO_PAUSE=1&& call stop-windows.bat"`，退出码 `0`；停止后 9983/8003/8004 监听数为 0，Milvus 运行容器数为 0。
 
 ## 2026-05-11 Windows 日志显示修复
 

@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     app_version: str = "1.0.0"
     debug: bool = False
     host: str = "0.0.0.0"  # nosec B104 - 服务默认监听所有网卡，可用 HOST 环境变量覆盖
-    port: int = 9900
+    port: int = 9983
 
     # Chat 模型配置
     # chat_provider 决定使用哪种 LangChain 接口：

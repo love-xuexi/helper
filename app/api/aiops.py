@@ -89,7 +89,7 @@ async def diagnose_stream(request: AIOpsRequest):
 
     **使用示例：**
     ```bash
-    curl -X POST "http://localhost:9900/api/aiops" \\
+    curl -X POST "http://localhost:9983/api/aiops" \\
       -H "Content-Type: application/json" \\
       -d '{"session_id": "session-123"}' \\
       --no-buffer
