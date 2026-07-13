@@ -9,10 +9,20 @@ echo.
 
 echo [1/4] Stopping FastAPI service...
 set "FASTAPI_STOPPED=0"
-taskkill /FI "WINDOWTITLE eq SmartQA API*" /T /F >nul 2>&1
-if not errorlevel 1 set "FASTAPI_STOPPED=1"
-for /f "tokens=5" %%p in ('netstat -ano ^| findstr /R /C:":9900 .*LISTENING"') do (
-    echo [INFO] Stopping FastAPI PID %%p on port 9900.
+if exist "server.pid" (
+    for /f %%P in (server.pid) do (
+        echo [INFO] Stopping FastAPI PID %%P ^(from server.pid^).
+        taskkill /PID %%P /T /F >nul 2>&1
+        if not errorlevel 1 set "FASTAPI_STOPPED=1"
+    )
+    del "server.pid" >nul 2>&1
+)
+if "!FASTAPI_STOPPED!"=="0" (
+    taskkill /FI "WINDOWTITLE eq SmartQA API*" /T /F >nul 2>&1
+    if not errorlevel 1 set "FASTAPI_STOPPED=1"
+)
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr /R /C:":9983 .*LISTENING"') do (
+    echo [INFO] Stopping FastAPI PID %%p on port 9983.
     taskkill /PID %%p /T /F >nul 2>&1
     if not errorlevel 1 set "FASTAPI_STOPPED=1"
 )
