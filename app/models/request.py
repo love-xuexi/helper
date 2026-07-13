@@ -70,3 +70,27 @@ class UploadUrlRequest(BaseModel):
 
     class Config:
         populate_by_name = True
+
+
+class BugReportRequest(BaseModel):
+    """Bug 上报请求（表单字段，实际接口使用 Form）"""
+
+    reporter: str = Field("anonymous", description="上报人", alias="reporter")
+    category: str = Field(..., description="分类: 检索问题/生成问题/模型配置问题/其他", alias="category")
+    title: str = Field(..., description="Bug 标题", alias="title")
+    content: str = Field(..., description="Bug 详细描述", alias="content")
+    session_id: str = Field("", description="关联会话 ID", alias="sessionId")
+    query: str = Field("", description="当时的用户问题", alias="query")
+    answer: str = Field("", description="当时的 AI 回答", alias="answer")
+
+    class Config:
+        populate_by_name = True
+
+
+class BugStatusUpdateRequest(BaseModel):
+    """Bug 状态更新请求"""
+
+    status: str = Field(..., description="新状态: 待处理/处理中/已解决/已关闭", alias="status")
+
+    class Config:
+        populate_by_name = True

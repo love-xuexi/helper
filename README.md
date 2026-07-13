@@ -7,6 +7,8 @@
 - 🤖 **智能问答** - 调用知识库 API 完成混合语义检索，LLM 基于检索结果生成回答
 - 📎 **引用标注** - 每条回答附带引用来源（文档名称、片段ID、相似度），可溯源核实，减少幻觉
 - 👍 **反馈评价** - 点赞/不喜欢按钮 + 结构化负反馈收集（回答不准确、文档已过时等），反馈数据入库
+- 🐞 **Bug 上报** - 支持分类上报 Bug（检索问题/生成问题/模型配置问题/其他），可上传附件，关联会话上下文
+- 📊 **管理后台** - 可视化管理页面，查看 Bug 列表、反馈记录、会话历史，支持 Bug 状态管理
 - 💬 **多轮对话** - 保留最近 3-5 轮上下文，支持多轮问答
 - 📚 **知识库管理** - 列出知识库、查看文档列表、上传文档（支持 PDF/Word/Excel/图片等）
 - 🌐 **现代界面** - 参考 ChatGPT/Claude 风格，简洁好用
@@ -54,10 +56,11 @@ notepad .env
 ```
 
 ### 访问服务
-- **Web 界面**: http://localhost:9900
-- **API 文档**: http://localhost:9900/docs
+- **Web 界面**: http://localhost:9983
+- **管理后台**: http://localhost:9983/admin
+- **API 文档**: http://localhost:9983/docs
 
-> 默认端口 `9900`（见 `app/config.py` 的 `port` 与 `.env` 的 `PORT`）。启动脚本会自动检查该端口的健康状态。如需修改端口，改 `PORT` 即可，无需改动脚本。
+> 默认端口 `9983`（见 `app/config.py` 的 `port` 与 `.env` 的 `PORT`）。启动脚本会自动检查该端口的健康状态。如需修改端口，改 `PORT` 即可，无需改动脚本。
 
 ## 📡 API 接口
 
@@ -77,6 +80,12 @@ notepad .env
 | 反馈详情 | GET | `/api/feedback/{id}` | 获取单条反馈 |
 | 按消息查反馈 | GET | `/api/feedback/message/{message_id}` | 查询某条回答的反馈状态 |
 | 删除反馈 | DELETE | `/api/feedback/{id}` | 删除单条反馈 |
+| Bug分类 | GET | `/api/bug/categories` | 获取预设分类与状态列表 |
+| 上报Bug | POST | `/api/bug/report` | multipart 上报 Bug（支持附件） |
+| Bug列表 | GET | `/api/bug/list` | 支持状态/分类过滤、分页 |
+| Bug详情 | GET | `/api/bug/{id}` | 获取单条 Bug 详情 |
+| 更新Bug状态 | PUT | `/api/bug/{id}/status` | 更新 Bug 状态 |
+| Bug统计 | GET | `/api/bug/stats` | 总数、状态分布、分类分布 |
 | 知识库列表 | GET | `/api/knowledge-bases` | 列出所有知识库 |
 | 文档列表 | GET | `/api/knowledge-bases/{kb_id}/docs` | 指定知识库的文档 |
 | 上传文档 | POST | `/api/upload` | multipart 上传文档到知识库 |
@@ -90,18 +99,18 @@ notepad .env
 
 ```bash
 # 流式对话
-curl -X POST "http://localhost:9900/api/chat_stream" \
+curl -X POST "http://localhost:9983/api/chat_stream" \
   -H "Content-Type: application/json" \
   -d '{"Id":"session-123","Question":"寿险投保规则是什么？"}' \
   --no-buffer
 
 # 上传文档到知识库（multipart）
-curl -X POST "http://localhost:9900/api/upload" \
+curl -X POST "http://localhost:9983/api/upload" \
   -F "file=@docs/policy.pdf" \
   -F "kbId=your-kb-id"
 
 # 提交反馈
-curl -X POST "http://localhost:9900/api/feedback" \
+curl -X POST "http://localhost:9983/api/feedback" \
   -H "Content-Type: application/json" \
   -d '{
     "sessionId":"session-123",
@@ -111,6 +120,18 @@ curl -X POST "http://localhost:9900/api/feedback" \
     "feedbackDescription":"回答中提到的体检标准和实际不符",
     "chunkIds":["859cffd18e948c98"]
   }'
+
+# 上报 Bug（支持附件）
+curl -X POST "http://localhost:9983/api/bug/report" \
+  -F "reporter=张三" \
+  -F "category=检索问题" \
+  -F "title=搜索结果不相关" \
+  -F "content=查询寿险投保规则时返回了无关文档" \
+  -F "session_id=session-123" \
+  -F "attachment=@screenshot.png"
+
+# 更新 Bug 状态
+curl -X PUT "http://localhost:9983/api/bug/1/status?status=已解决"
 ```
 
 ## ⚙️ 配置说明
@@ -151,11 +172,23 @@ KB_FAQ_BOTCODE=a2a45e52569f48ac9a2a2ca1d1e2718c
 KB_FAQ_CHANNEL=1
 
 # 反馈数据库路径（SQLite）
+
 FEEDBACK_DB_PATH=./data/feedback.db
 
 # 可选：反馈数据外部推送 API（留空则仅本地存储）
+
 FEEDBACK_EXTERNAL_API_URL=
+
 FEEDBACK_EXTERNAL_API_TOKEN=
+
+
+# Bug 数据库路径（SQLite）
+
+BUG_DB_PATH=./data/bug.db
+
+# Bug 附件存储目录
+
+BUG_UPLOAD_DIR=./data/uploads
 
 # 会话持久化（memory 或 postgres）
 SESSION_CHECKPOINT_BACKEND=memory
@@ -175,18 +208,21 @@ helper/
 │   ├── api/                            # API 路由层
 │   │   ├── chat.py                     # 对话接口（RAG + 引用）
 │   │   ├── feedback.py                 # 反馈评价接口
+│   │   ├── bug.py                      # Bug 上报接口
 │   │   ├── file.py                     # 文件上传 + 知识库管理
 │   │   ├── health.py                   # 健康检查
 │   │   └── aiops.py                    # AIOps（预留）
 │   ├── services/                       # 业务服务层
 │   │   ├── kb_api_client.py            # 知识库 API 客户端
 │   │   ├── rag_agent_service.py        # RAG 问答服务（检索 + 生成）
-│   │   └── feedback_service.py         # 反馈评价服务（SQLite）
+│   │   ├── feedback_service.py         # 反馈评价服务（SQLite）
+│   │   └── bug_service.py              # Bug 上报服务（SQLite + 附件）
 │   ├── models/                         # 数据模型
 │   ├── core/                           # 核心组件（LLM工厂、会话持久化）
 │   └── tools/                           # 工具模块
 ├── static/                             # Web 前端
 │   ├── index.html                      # 主页面
+│   ├── admin.html                      # 管理后台页面
 │   ├── app.js                          # 前端逻辑
 │   └── styles.css                      # 样式表
 ├── data/                               # 数据目录（反馈数据库）
@@ -211,6 +247,14 @@ helper/
 - **多维评价机制**：每条回答下方设置"点赞"与"不喜欢"按钮
 - **结构化负反馈收集**：点击"不喜欢"时弹出结构化选项（回答不准确、文档已过时、逻辑不清晰、未解决实际问题等），并预留文本框补充详细描述
 - **反馈数据入库**：将用户原始提问、AI回答、评价标签、详细描述及关联的知识片段ID存入反馈数据库
+
+### 2.5 Bug 上报与管理
+
+- **分类上报**：支持四种分类（检索问题、生成问题、模型配置问题、其他）
+- **附件上传**：Bug 上报时可附带截图或日志文件（最大 20MB）
+- **上下文关联**：自动关联当前会话 ID、用户问题和 AI 回答，便于追溯
+- **状态管理**：Bug 状态流转（待处理 → 处理中 → 已解决 → 已关闭）
+- **管理后台**：提供 `/admin` 页面，可视化查看 Bug 列表、反馈记录、会话历史，支持筛选和状态更新
 
 ### 3. 知识库自进化（预留，后续实现）
 

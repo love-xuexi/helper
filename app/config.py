@@ -92,6 +92,12 @@ class Settings(BaseSettings):
     feedback_external_api_url: str = ""
     feedback_external_api_token: str = ""
 
+    # ---- Bug 上报系统配置 ----
+    # Bug 数据库路径（SQLite）
+    bug_db_path: str = "./data/bug.db"
+    # Bug 附件存储目录
+    bug_upload_dir: str = "./data/uploads"
+
     # RAG 配置（保留兼容旧配置，实际检索改用 KB API）
     rag_top_k: int = 3
     rag_candidate_top_k: int = 20

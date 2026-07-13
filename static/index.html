@@ -53,6 +53,19 @@
 
         <!-- 主内容区域 -->
         <main class="main-content">
+            <!-- 顶部工具栏 -->
+            <div class="chat-toolbar">
+                <div class="chat-toolbar-title">智能问答助手</div>
+                <div class="chat-toolbar-actions">
+                    <button class="toolbar-btn" id="toolbarBugBtn" title="上报Bug">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M8 2L9.5 4.5M16 2L14.5 4.5M5 8L3 8M21 8L19 8M6 16L4 17M18 16L20 17M9 10V9M15 10V9M12 19C8.5 19 6 16.5 6 13V11C6 7.5 8.5 5 12 5C15.5 5 18 7.5 18 11V13C18 16.5 15.5 19 12 19ZM10 13C10 13.5 10.5 14 11 14H13C13.5 14 14 13.5 14 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        <span>上报Bug</span>
+                    </button>
+                </div>
+            </div>
+
             <div class="chat-container">
                 <!-- 欢迎界面 -->
                 <div class="welcome-screen" id="welcomeScreen">
@@ -110,6 +123,12 @@
                                                 <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20V22H6.5A2.5 2.5 0 0 1 4 19.5V4.5A2.5 2.5 0 0 1 6.5 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                                             </svg>
                                             <span>知识库管理</span>
+                                        </div>
+                                        <div class="tools-menu-item" id="bugReportMenuItem">
+                                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                <path d="M8 2L9.5 4.5M16 2L14.5 4.5M5 8L3 8M21 8L19 8M6 16L4 17M18 16L20 17M9 10V9M15 10V9M12 19C8.5 19 6 16.5 6 13V11C6 7.5 8.5 5 12 5C15.5 5 18 7.5 18 11V13C18 16.5 15.5 19 12 19ZM10 13C10 13.5 10.5 14 11 14H13C13.5 14 14 13.5 14 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                            </svg>
+                                            <span>上报Bug</span>
                                         </div>
                                     </div>
                                 </div>
@@ -189,6 +208,53 @@
                     <div class="kb-list" id="kbListContainer">
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bug上报弹窗 -->
+    <div class="modal-overlay" id="bugModal" style="display: none;">
+        <div class="modal-content bug-modal">
+            <div class="modal-header">
+                <h3 class="modal-title">🐞 上报Bug</h3>
+                <button class="modal-close" id="bugModalClose">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="bug-form">
+                    <div class="bug-form-field">
+                        <label>分类 <span style="color:#ea4335;">*</span></label>
+                        <select id="bugCategory" class="kb-select">
+                            <option value="检索问题">检索问题</option>
+                            <option value="生成问题">生成问题</option>
+                            <option value="模型配置问题">模型配置问题</option>
+                            <option value="其他">其他</option>
+                        </select>
+                    </div>
+                    <div class="bug-form-field">
+                        <label>标题 <span style="color:#ea4335;">*</span></label>
+                        <input type="text" id="bugTitle" placeholder="简要描述Bug标题" maxlength="100" style="width:100%;padding:8px 14px;border:1px solid #d1d1d1;border-radius:10px;font-size:14px;">
+                    </div>
+                    <div class="bug-form-field">
+                        <label>详细描述 <span style="color:#ea4335;">*</span></label>
+                        <textarea id="bugContent" placeholder="请详细描述Bug发生的情况..." rows="5" maxlength="2000" style="width:100%;padding:10px 14px;border:1px solid #d1d1d1;border-radius:10px;font-size:14px;resize:vertical;"></textarea>
+                    </div>
+                    <div class="bug-form-field">
+                        <label>附件（可选）</label>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <button class="btn btn-secondary" id="bugAttachmentBtn" type="button">选择文件</button>
+                            <span id="bugAttachmentName" style="font-size:13px;color:#888;">未选择文件</span>
+                        </div>
+                        <input type="file" id="bugFileInput" accept=".png,.jpg,.jpeg,.gif,.bmp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv,.log,.zip,.json" style="display:none;">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="bugCancelBtn">取消</button>
+                <button class="btn btn-primary" id="bugSubmitBtn">提交Bug</button>
             </div>
         </div>
     </div>

@@ -111,6 +111,9 @@ class SmartQAApp {
         this.newChatBtn = document.getElementById('newChatBtn');
         this.kbManageBtn = document.getElementById('kbManageBtn');
 
+        // 顶部工具栏
+        this.toolbarBugBtn = document.getElementById('toolbarBugBtn');
+
         this.messageInput = document.getElementById('messageInput');
         this.sendButton = document.getElementById('sendButton');
         this.stopButton = document.getElementById('stopButton');
@@ -142,6 +145,19 @@ class SmartQAApp {
         this.kbSelect = document.getElementById('kbSelect');
         this.kbUploadBtn = document.getElementById('kbUploadBtn');
         this.kbListContainer = document.getElementById('kbListContainer');
+
+        // Bug上报弹窗
+        this.bugReportMenuItem = document.getElementById('bugReportMenuItem');
+        this.bugModal = document.getElementById('bugModal');
+        this.bugModalClose = document.getElementById('bugModalClose');
+        this.bugCategory = document.getElementById('bugCategory');
+        this.bugTitle = document.getElementById('bugTitle');
+        this.bugContent = document.getElementById('bugContent');
+        this.bugAttachmentBtn = document.getElementById('bugAttachmentBtn');
+        this.bugAttachmentName = document.getElementById('bugAttachmentName');
+        this.bugFileInput = document.getElementById('bugFileInput');
+        this.bugCancelBtn = document.getElementById('bugCancelBtn');
+        this.bugSubmitBtn = document.getElementById('bugSubmitBtn');
 
         this.checkAndSetCentered();
     }
@@ -205,6 +221,41 @@ class SmartQAApp {
         }
         if (this.kbManageBtn) {
             this.kbManageBtn.addEventListener('click', () => this.openKbModal());
+        }
+
+        // Bug上报
+        if (this.bugReportMenuItem) {
+            this.bugReportMenuItem.addEventListener('click', () => {
+                this.closeToolsMenu();
+                this.openBugModal();
+            });
+        }
+        if (this.toolbarBugBtn) {
+            this.toolbarBugBtn.addEventListener('click', () => {
+                this.openBugModal();
+            });
+        }
+        if (this.bugModalClose) {
+            this.bugModalClose.addEventListener('click', () => this.closeBugModal());
+        }
+        if (this.bugCancelBtn) {
+            this.bugCancelBtn.addEventListener('click', () => this.closeBugModal());
+        }
+        if (this.bugSubmitBtn) {
+            this.bugSubmitBtn.addEventListener('click', () => this.submitBug());
+        }
+        if (this.bugAttachmentBtn) {
+            this.bugAttachmentBtn.addEventListener('click', () => {
+                if (this.bugFileInput) this.bugFileInput.click();
+            });
+        }
+        if (this.bugFileInput) {
+            this.bugFileInput.addEventListener('change', (e) => this.handleBugFileSelect(e));
+        }
+        if (this.bugModal) {
+            this.bugModal.addEventListener('click', (e) => {
+                if (e.target === this.bugModal) this.closeBugModal();
+            });
         }
         document.addEventListener('click', (e) => {
             if (this.toolsBtn && this.toolsMenu &&
@@ -1247,6 +1298,114 @@ class SmartQAApp {
             this.isStreaming = false;
             this.showUploadOverlay(false);
             this.updateUI();
+        }
+    }
+
+    // ==================== Bug 上报 ====================
+
+    openBugModal() {
+        // 重置表单
+        if (this.bugTitle) this.bugTitle.value = '';
+        if (this.bugContent) this.bugContent.value = '';
+        if (this.bugFileInput) this.bugFileInput.value = '';
+        if (this.bugAttachmentName) this.bugAttachmentName.textContent = '未选择文件';
+        this.bugAttachmentFile = null;
+
+        // 尝试预填当前对话上下文
+        this.bugContextQuery = '';
+        this.bugContextAnswer = '';
+        if (this.currentChatHistory && this.currentChatHistory.length > 0) {
+            const lastAssistant = [...this.currentChatHistory].reverse().find(m => m.type === 'assistant');
+            const lastUser = [...this.currentChatHistory].reverse().find(m => m.type === 'user');
+            if (lastUser) this.bugContextQuery = lastUser.content || '';
+            if (lastAssistant) this.bugContextAnswer = lastAssistant.content || '';
+        }
+
+        if (this.bugModal) {
+            this.bugModal.style.display = 'flex';
+        }
+    }
+
+    closeBugModal() {
+        if (this.bugModal) {
+            this.bugModal.style.display = 'none';
+        }
+        this.bugAttachmentFile = null;
+    }
+
+    handleBugFileSelect(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const maxSize = 20 * 1024 * 1024;
+        if (file.size > maxSize) {
+            this.showNotification('附件大小不能超过20MB', 'error');
+            if (this.bugFileInput) this.bugFileInput.value = '';
+            return;
+        }
+
+        this.bugAttachmentFile = file;
+        if (this.bugAttachmentName) {
+            this.bugAttachmentName.textContent = file.name;
+        }
+    }
+
+    async submitBug() {
+        const category = this.bugCategory ? this.bugCategory.value : '';
+        const title = this.bugTitle ? this.bugTitle.value.trim() : '';
+        const content = this.bugContent ? this.bugContent.value.trim() : '';
+
+        if (!title) {
+            this.showNotification('请填写Bug标题', 'warning');
+            return;
+        }
+        if (!content) {
+            this.showNotification('请填写Bug详细描述', 'warning');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('reporter', 'anonymous');
+        formData.append('category', category);
+        formData.append('title', title);
+        formData.append('content', content);
+        formData.append('session_id', this.sessionId || '');
+        formData.append('query', this.bugContextQuery || '');
+        formData.append('answer', this.bugContextAnswer || '');
+        if (this.bugAttachmentFile) {
+            formData.append('attachment', this.bugAttachmentFile);
+        }
+
+        this.showUploadOverlay(true);
+        const loadingText = this.loadingOverlay ? this.loadingOverlay.querySelector('.loading-text') : null;
+        const loadingSubtext = this.loadingOverlay ? this.loadingOverlay.querySelector('.loading-subtext') : null;
+        if (loadingText) loadingText.textContent = '正在提交Bug...';
+        if (loadingSubtext) loadingSubtext.textContent = '请稍候';
+
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/bug/report`, {
+                method: 'POST',
+                body: formData,
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP错误: ${response.status}`);
+            }
+
+            const data = await response.json();
+            if (data.code === 200) {
+                this.showNotification('Bug上报成功，感谢您的反馈！', 'success');
+                this.closeBugModal();
+            } else {
+                throw new Error(data.message || data.detail || '提交失败');
+            }
+        } catch (error) {
+            console.error('Bug上报失败:', error);
+            this.showNotification('Bug上报失败: ' + error.message, 'error');
+        } finally {
+            this.showUploadOverlay(false);
+            if (loadingText) loadingText.textContent = '正在处理...';
+            if (loadingSubtext) loadingSubtext.textContent = '请稍候';
         }
     }
 

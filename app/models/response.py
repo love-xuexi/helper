@@ -121,3 +121,19 @@ class DocumentInfo(BaseModel):
     name: str = Field(..., description="文档名称")
     create_date: str = Field("", description="创建时间")
     update_date: str = Field("", description="更新时间")
+
+
+class BugListResponse(BaseModel):
+    """Bug 列表响应"""
+
+    total: int = Field(..., description="Bug 总数")
+    limit: int = Field(..., description="每页数量")
+    items: List[Dict[str, Any]] = Field(default_factory=list, description="Bug 列表")
+
+
+class BugStatsResponse(BaseModel):
+    """Bug 统计响应"""
+
+    status: str = Field(..., description="状态")
+    message: str = Field(..., description="消息")
+    data: Optional[Dict[str, Any]] = Field(None, description="统计数据")
