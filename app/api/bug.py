@@ -55,6 +55,7 @@ async def report_bug(
     session_id: str = Form("", description="关联会话 ID"),
     query: str = Form("", description="当时的用户问题"),
     answer: str = Form("", description="当时的 AI 回答"),
+    user_id: str = Form("", description="用户 ID（用户隔离钩子，当前可空）"),
     attachment: UploadFile | None = File(None, description="附件（可选）"),
 ) -> JSONResponse:
     """上报 Bug，支持附件上传。
@@ -98,6 +99,7 @@ async def report_bug(
             query=query,
             answer=answer,
             attachment_path=attachment_path,
+            user_id=user_id,
         )
         logger.info(f"[Bug] 上报成功: id={result['id']}, category={category}")
 
@@ -125,6 +127,7 @@ async def list_bugs(
     category: str | None = Query(None, description="按分类过滤"),
     limit: int = Query(50, ge=1, le=200, description="每页数量"),
     offset: int = Query(0, ge=0, description="偏移量"),
+    user_id: str | None = Query(None, description="按用户 ID 过滤（用户隔离钩子，当前可空）"),
 ) -> JSONResponse:
     """列出 Bug（按时间倒序）。"""
     try:
@@ -133,8 +136,10 @@ async def list_bugs(
         if category and category not in BUG_CATEGORIES:
             raise HTTPException(status_code=400, detail=f"category 必须是: {', '.join(BUG_CATEGORIES)}")
 
-        items = bug_service.list_bugs(limit=limit, offset=offset, status=status, category=category)
-        total = bug_service.count_bugs(status=status, category=category)
+        items = bug_service.list_bugs(
+            limit=limit, offset=offset, status=status, category=category, user_id=user_id
+        )
+        total = bug_service.count_bugs(status=status, category=category, user_id=user_id)
 
         return JSONResponse(
             status_code=200,
@@ -172,6 +177,26 @@ async def get_bug_stats() -> JSONResponse:
     except Exception as e:
         logger.error(f"[Bug] 获取统计失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取统计失败: {e}")
+
+
+@router.get("/bug/timeline")
+async def get_bug_timeline(
+    days: int = Query(30, ge=1, le=365, description="统计天数"),
+) -> JSONResponse:
+    """获取 Bug 上报时间序列数据（按天聚合，用于折线图）。"""
+    try:
+        timeline = bug_service.get_timeline(days=days)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "code": 200,
+                "message": "success",
+                "data": {"timeline": timeline, "days": days},
+            },
+        )
+    except Exception as e:
+        logger.error(f"[Bug] 获取时间序列失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取时间序列失败: {e}")
 
 
 @router.get("/bug/{bug_id}")

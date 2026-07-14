@@ -69,10 +69,13 @@ class BugStore:
                     status TEXT NOT NULL DEFAULT '待处理',
                     attachment_path TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    user_id TEXT NOT NULL DEFAULT ''
                 )
                 """
             )
+            # 兼容已存在的旧表：补 user_id 列
+            self._ensure_column(conn, "bugs", "user_id", "TEXT NOT NULL DEFAULT ''")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_bugs_status ON bugs(status)"
             )
@@ -85,8 +88,18 @@ class BugStore:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_bugs_created ON bugs(created_at DESC)"
             )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_bugs_user ON bugs(user_id)"
+            )
         self._initialized = True
         logger.info(f"[BugStore] 数据库初始化完成: {self.db_path}")
+
+    @staticmethod
+    def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+        """安全地为已存在的表补充列（幂等）。"""
+        cols = [row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def _get_conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -103,6 +116,7 @@ class BugStore:
         query: str = "",
         answer: str = "",
         attachment_path: str = "",
+        user_id: str = "",
     ) -> dict[str, Any]:
         """创建一条 Bug 记录。"""
         now = datetime.now().isoformat()
@@ -112,13 +126,13 @@ class BugStore:
                 INSERT INTO bugs (
                     reporter, category, title, content,
                     session_id, query, answer, status, attachment_path,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    created_at, updated_at, user_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     reporter or "anonymous", category, title, content,
                     session_id, query, answer, "待处理", attachment_path,
-                    now, now,
+                    now, now, user_id,
                 ),
             )
             bug_id = cursor.lastrowid
@@ -141,6 +155,7 @@ class BugStore:
         offset: int = 0,
         status: str | None = None,
         category: str | None = None,
+        user_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """列出 Bug（按时间倒序）。"""
         query = "SELECT * FROM bugs WHERE 1=1"
@@ -151,6 +166,9 @@ class BugStore:
         if category:
             query += " AND category = ?"
             params.append(category)
+        if user_id is not None:
+            query += " AND user_id = ?"
+            params.append(user_id)
         query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
@@ -162,8 +180,9 @@ class BugStore:
         self,
         status: str | None = None,
         category: str | None = None,
+        user_id: str | None = None,
     ) -> int:
-        """统计 Bug 总数（可按状态/分类过滤）。"""
+        """统计 Bug 总数（可按状态/分类/用户过滤）。"""
         query = "SELECT COUNT(*) FROM bugs WHERE 1=1"
         params: list[Any] = []
         if status:
@@ -172,6 +191,9 @@ class BugStore:
         if category:
             query += " AND category = ?"
             params.append(category)
+        if user_id is not None:
+            query += " AND user_id = ?"
+            params.append(user_id)
         with self._get_conn() as conn:
             return conn.execute(query, params).fetchone()[0]
 
@@ -210,6 +232,38 @@ class BugStore:
             "category_distribution": category_counts,
         }
 
+    def get_timeline(self, days: int = 30) -> list[dict[str, Any]]:
+        """获取按天聚合的 Bug 上报时间序列数据。
+
+        返回格式: [{"date": "2026-07-01", "bugs": 3}, ...]
+        """
+        from datetime import datetime, timedelta
+
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days - 1)
+
+        date_map: dict[str, int] = {}
+        for i in range(days):
+            d = (start_date + timedelta(days=i)).strftime("%Y-%m-%d")
+            date_map[d] = 0
+
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT created_at FROM bugs WHERE created_at >= ?",
+                (start_date.isoformat(),),
+            ).fetchall()
+
+        for row in rows:
+            created_at = row["created_at"]
+            try:
+                d = datetime.fromisoformat(created_at).strftime("%Y-%m-%d")
+            except (ValueError, TypeError):
+                continue
+            if d in date_map:
+                date_map[d] += 1
+
+        return [{"date": d, "bugs": c} for d, c in sorted(date_map.items())]
+
     @staticmethod
     def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
         return {
@@ -225,6 +279,7 @@ class BugStore:
             "attachment_path": row["attachment_path"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
+            "user_id": row["user_id"],
         }
 
 
@@ -249,6 +304,7 @@ class BugService:
         query: str = "",
         answer: str = "",
         attachment_path: str = "",
+        user_id: str = "",
     ) -> dict[str, Any]:
         """上报 Bug。"""
         if category not in BUG_CATEGORIES:
@@ -266,6 +322,7 @@ class BugService:
             query=query,
             answer=answer,
             attachment_path=attachment_path,
+            user_id=user_id,
         )
 
     def get_bug(self, bug_id: int) -> dict[str, Any] | None:
@@ -277,21 +334,28 @@ class BugService:
         offset: int = 0,
         status: str | None = None,
         category: str | None = None,
+        user_id: str | None = None,
     ) -> list[dict[str, Any]]:
         return self.store.list_bugs(
-            limit=limit, offset=offset, status=status, category=category
+            limit=limit, offset=offset, status=status, category=category, user_id=user_id
         )
 
     def count_bugs(
-        self, status: str | None = None, category: str | None = None
+        self,
+        status: str | None = None,
+        category: str | None = None,
+        user_id: str | None = None,
     ) -> int:
-        return self.store.count_bugs(status=status, category=category)
+        return self.store.count_bugs(status=status, category=category, user_id=user_id)
 
     def update_status(self, bug_id: int, status: str) -> dict[str, Any] | None:
         return self.store.update_status(bug_id, status)
 
     def get_stats(self) -> dict[str, Any]:
         return self.store.get_stats()
+
+    def get_timeline(self, days: int = 30) -> list[dict[str, Any]]:
+        return self.store.get_timeline(days=days)
 
 
 # 全局单例

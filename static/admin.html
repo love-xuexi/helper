@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>管理后台 - 智能问答助手</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -126,7 +127,7 @@
             margin: 2px 4px 2px 0;
         }
         .cell-content {
-            max-width: 300px;
+            max-width: 100%;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -192,6 +193,28 @@
             font-size: 12px;
         }
         .detail-btn:hover { background: #d0e0fd; }
+        .action-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+
+        .load-more-wrapper {
+            text-align: center;
+            padding: 20px;
+        }
+        .load-more-btn {
+            padding: 8px 32px;
+            border: 1px solid #0084ff;
+            border-radius: 10px;
+            background: #fff;
+            color: #0084ff;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        .load-more-btn:hover { background: #0084ff; color: #fff; }
+        .load-more-info { font-size: 12px; color: #888; margin-top: 8px; }
+
+        .badge-bug { background: #fff8e1; color: #e65100; }
+        .badge-feedback-like { background: #e8f5e9; color: #1b5e20; }
+        .badge-feedback-dislike { background: #ffebee; color: #c62828; }
 
         /* 弹窗 */
         .modal-overlay {
@@ -247,6 +270,33 @@
             .cell-content { max-width: 120px; }
             .filter-row { flex-direction: column; align-items: stretch; }
         }
+
+        /* 图表区域 */
+        .charts-section {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .chart-card {
+            background: #fff;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .chart-card h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 16px;
+        }
+        .chart-wrapper {
+            position: relative;
+            height: 280px;
+        }
+        @media (max-width: 768px) {
+            .charts-section { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
 <body>
@@ -255,18 +305,35 @@
             <h1>📊 管理后台</h1>
             <div class="header-actions">
                 <button class="refresh-btn" onclick="loadAll()">🔄 刷新</button>
-                <a href="/" class="back-link">← 返回对话</a>
+                <!-- <a href="/" class="back-link">← 返回对话</a> -->
             </div>
         </div>
 
         <!-- 统计 -->
         <div class="stats" id="stats"></div>
 
+        <!-- 图表区域 -->
+        <div class="charts-section">
+            <div class="chart-card">
+                <h3>反馈比例分布</h3>
+                <div class="chart-wrapper">
+                    <canvas id="ratioChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-card">
+                <h3>近 30 天反馈趋势</h3>
+                <div class="chart-wrapper">
+                    <canvas id="trendChart"></canvas>
+                </div>
+            </div>
+        </div>
+
         <!-- 标签页 -->
         <div class="tabs">
             <button class="active" data-tab="bugs" onclick="switchTab('bugs')">🐞 Bug列表</button>
             <button data-tab="feedbacks" onclick="switchTab('feedbacks')">👍 反馈记录</button>
             <button data-tab="sessions" onclick="switchTab('sessions')">💬 会话列表</button>
+            <button data-tab="all" onclick="switchTab('all')">📋 全部</button>
         </div>
 
         <!-- Bug列表 -->
@@ -286,7 +353,7 @@
                     <option value="模型配置问题">模型配置问题</option>
                     <option value="其他">其他</option>
                 </select>
-                <button onclick="loadBugs()">筛选</button>
+                <button onclick="loadBugs(false)">筛选</button>
             </div>
             <div id="bugList"></div>
         </div>
@@ -299,7 +366,16 @@
                     <option value="like">👍 点赞</option>
                     <option value="dislike">👎 点踩</option>
                 </select>
-                <button onclick="loadFeedbacks()">筛选</button>
+                <select id="feedbackTagFilter">
+                    <option value="">全部标签</option>
+                    <option value="回答不准确">回答不准确</option>
+                    <option value="文档已过时">文档已过时</option>
+                    <option value="逻辑不清晰">逻辑不清晰</option>
+                    <option value="未解决实际问题">未解决实际问题</option>
+                    <option value="信息不完整">信息不完整</option>
+                    <option value="引用来源错误">引用来源错误</option>
+                </select>
+                <button onclick="loadFeedbacks(false)">筛选</button>
             </div>
             <div id="feedbackList"></div>
         </div>
@@ -307,6 +383,11 @@
         <!-- 会话列表 -->
         <div class="tab-content" id="tab-sessions">
             <div id="sessionList"></div>
+        </div>
+
+        <!-- 全部（Bug + 反馈 时间线） -->
+        <div class="tab-content" id="tab-all">
+            <div id="allTimelineList"></div>
         </div>
     </div>
 
@@ -328,7 +409,32 @@
         </div>
     </div>
 
+    <!-- 反馈上下文/完整问答弹窗 -->
+    <div class="modal-overlay" id="feedbackContextModal">
+        <div class="modal-box">
+            <h3 id="feedbackContextTitle">完整上下文</h3>
+            <div id="feedbackContextContent"></div>
+            <button class="modal-close-btn" onclick="closeFeedbackContext()">关闭</button>
+        </div>
+    </div>
+
     <script>
+        // ==================== 分页状态 ====================
+        const PAGE_SIZE = 10;
+        const pageState = {
+            bugs: { offset: 0, total: 0, items: [] },
+            feedbacks: { offset: 0, total: 0, items: [] },
+            sessions: { offset: 0, total: 0 },
+            all: { offset: 0, total: 0 },
+        };
+
+        // ==================== ESC 关闭弹窗 ====================
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                document.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));
+            }
+        });
+
         // ==================== 标签页切换 ====================
         function switchTab(tabName) {
             document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
@@ -337,9 +443,22 @@
             document.getElementById('tab-' + tabName).classList.add('active');
         }
 
-        // ==================== 加载所有数据 ====================
+        // ==================== 加载所有数据（刷新） ====================
         async function loadAll() {
-            await Promise.all([loadStats(), loadBugs(), loadFeedbacks(), loadSessions()]);
+            // 重置分页
+            Object.keys(pageState).forEach(k => {
+                pageState[k].offset = 0;
+                pageState[k].total = 0;
+                if (pageState[k].items) pageState[k].items = [];
+            });
+            await Promise.all([
+                loadStats(),
+                loadBugs(false),
+                loadFeedbacks(false),
+                loadSessions(false),
+                loadAllTimeline(false),
+                loadCharts(),
+            ]);
         }
 
         // ==================== 统计 ====================
@@ -370,11 +489,29 @@
             }
         }
 
+        // ==================== 加载更多按钮渲染 ====================
+        function renderLoadMore(containerId, currentCount, total, onLoadMore) {
+            if (currentCount >= total) return '';
+            return `
+                <div class="load-more-wrapper">
+                    <button class="load-more-btn" onclick="${onLoadMore}">加载更多</button>
+                    <div class="load-more-info">已加载 ${currentCount} / ${total} 条</div>
+                </div>
+            `;
+        }
+
         // ==================== Bug 列表 ====================
-        async function loadBugs() {
+        async function loadBugs(append) {
+            const ps = pageState.bugs;
             const status = document.getElementById('bugStatusFilter').value;
             const category = document.getElementById('bugCategoryFilter').value;
-            let url = '/api/bug/list?limit=200';
+
+            if (!append) {
+                ps.offset = 0;
+                ps.items = [];
+            }
+
+            let url = `/api/bug/list?limit=${PAGE_SIZE}&offset=${ps.offset}`;
             if (status) url += '&status=' + encodeURIComponent(status);
             if (category) url += '&category=' + encodeURIComponent(category);
 
@@ -382,8 +519,10 @@
                 const resp = await fetch(url);
                 const data = await resp.json();
                 const bugs = (data.data && data.data.items) || [];
+                ps.total = (data.data && data.data.total) || bugs.length;
+                ps.items = append ? ps.items.concat(bugs) : bugs;
 
-                if (bugs.length === 0) {
+                if (ps.items.length === 0) {
                     document.getElementById('bugList').innerHTML = `
                         <div class="empty-state"><div class="icon">📭</div><p>暂无Bug记录</p></div>
                     `;
@@ -402,7 +541,7 @@
                         <th>操作</th>
                     </tr></thead><tbody>`;
 
-                bugs.forEach(b => {
+                ps.items.forEach(b => {
                     const statusClass = {
                         '待处理': 'badge-pending',
                         '处理中': 'badge-processing',
@@ -425,22 +564,30 @@
                         <td>${attachHtml}</td>
                         <td style="font-size:12px;color:#888;">${timeStr}</td>
                         <td>
-                            <select class="status-select" onchange="updateBugStatus(${b.id}, this.value)">
-                                <option value="待处理" ${b.status === '待处理' ? 'selected' : ''}>待处理</option>
-                                <option value="处理中" ${b.status === '处理中' ? 'selected' : ''}>处理中</option>
-                                <option value="已解决" ${b.status === '已解决' ? 'selected' : ''}>已解决</option>
-                                <option value="已关闭" ${b.status === '已关闭' ? 'selected' : ''}>已关闭</option>
-                            </select>
-                            <button class="detail-btn" onclick="viewBugDetail(${b.id})">详情</button>
+                            <div class="action-btns">
+                                <select class="status-select" onchange="updateBugStatus(${b.id}, this.value)">
+                                    <option value="待处理" ${b.status === '待处理' ? 'selected' : ''}>待处理</option>
+                                    <option value="处理中" ${b.status === '处理中' ? 'selected' : ''}>处理中</option>
+                                    <option value="已解决" ${b.status === '已解决' ? 'selected' : ''}>已解决</option>
+                                    <option value="已关闭" ${b.status === '已关闭' ? 'selected' : ''}>已关闭</option>
+                                </select>
+                                <button class="detail-btn" onclick="viewBugDetail(${b.id})">详情</button>
+                            </div>
                         </td>
                     </tr>`;
                 });
 
                 html += '</tbody></table>';
+                html += renderLoadMore('bugList', ps.items.length, ps.total, 'loadBugsMore()');
                 document.getElementById('bugList').innerHTML = html;
             } catch(e) {
                 document.getElementById('bugList').innerHTML = `<div class="empty-state"><p>加载失败: ${e.message}</p></div>`;
             }
+        }
+
+        function loadBugsMore() {
+            pageState.bugs.offset += PAGE_SIZE;
+            loadBugs(true);
         }
 
         async function updateBugStatus(id, status) {
@@ -450,7 +597,7 @@
                 });
                 const data = await resp.json();
                 if (data.code === 200) {
-                    loadBugs();
+                    loadBugs(false);
                     loadStats();
                 } else {
                     alert('更新失败: ' + (data.detail || data.message || '未知错误'));
@@ -499,17 +646,28 @@
         }
 
         // ==================== 反馈记录 ====================
-        async function loadFeedbacks() {
+        async function loadFeedbacks(append) {
+            const ps = pageState.feedbacks;
             const rating = document.getElementById('feedbackRatingFilter').value;
-            let url = '/api/feedback?limit=200';
+            const tag = document.getElementById('feedbackTagFilter').value;
+
+            if (!append) {
+                ps.offset = 0;
+                ps.items = [];
+            }
+
+            let url = `/api/feedback?limit=${PAGE_SIZE}&offset=${ps.offset}`;
             if (rating) url += '&rating=' + encodeURIComponent(rating);
+            if (tag) url += '&tag=' + encodeURIComponent(tag);
 
             try {
                 const resp = await fetch(url);
                 const data = await resp.json();
                 const feedbacks = data.items || [];
+                ps.total = data.total || feedbacks.length;
+                ps.items = append ? ps.items.concat(feedbacks) : feedbacks;
 
-                if (feedbacks.length === 0) {
+                if (ps.items.length === 0) {
                     document.getElementById('feedbackList').innerHTML = `
                         <div class="empty-state"><div class="icon">📭</div><p>暂无反馈记录</p></div>
                     `;
@@ -518,15 +676,16 @@
 
                 let html = `<table>
                     <thead><tr>
-                        <th>类型</th>
+                        <th style="width:90px;">类型</th>
                         <th>问题</th>
-                        <th>回答（摘要）</th>
-                        <th>负反馈标签</th>
-                        <th>详细描述</th>
-                        <th>时间</th>
+                        <th style="width:220px;">回答（摘要）</th>
+                        <th style="width:160px;">负反馈标签</th>
+                        <th style="width:200px;">详细描述</th>
+                        <th style="width:150px;">时间</th>
+                        <th style="width:170px;">操作</th>
                     </tr></thead><tbody>`;
 
-                feedbacks.forEach(f => {
+                ps.items.forEach((f, idx) => {
                     const badgeClass = f.rating === 'like' ? 'badge-like' : 'badge-dislike';
                     const icon = f.rating === 'like' ? '👍' : '👎';
                     const query = f.question || '未知问题';
@@ -541,24 +700,143 @@
                         <td>${tags}</td>
                         <td><div class="cell-content" title="${escapeHtml(f.feedback_description || '')}">${escapeHtml(desc)}</div></td>
                         <td style="font-size:12px;color:#888;">${formatTime(f.created_at)}</td>
+                        <td>
+                            <div class="action-btns">
+                                <button class="detail-btn" onclick="viewFeedbackQa(${idx})">完整问答</button>
+                                <button class="detail-btn" onclick="viewFeedbackContext(${idx})">完整上下文</button>
+                            </div>
+                        </td>
                     </tr>`;
                 });
 
                 html += '</tbody></table>';
+                html += renderLoadMore('feedbackList', ps.items.length, ps.total, 'loadFeedbacksMore()');
                 document.getElementById('feedbackList').innerHTML = html;
             } catch(e) {
                 document.getElementById('feedbackList').innerHTML = `<div class="empty-state"><p>加载失败: ${e.message}</p></div>`;
             }
         }
 
-        // ==================== 会话列表 ====================
-        async function loadSessions() {
+        function loadFeedbacksMore() {
+            pageState.feedbacks.offset += PAGE_SIZE;
+            loadFeedbacks(true);
+        }
+
+        // ==================== 反馈：完整问答 ====================
+        function viewFeedbackQa(idx) {
+            const f = pageState.feedbacks.items[idx];
+            if (!f) return;
+
+            document.getElementById('feedbackContextTitle').textContent = '完整问答';
+            document.getElementById('feedbackContextContent').innerHTML = `
+                <div class="field"><div class="field-label">👤 用户问题</div><pre>${escapeHtml(f.question || '无')}</pre></div>
+                <div class="field"><div class="field-label">🤖 AI 回答</div><pre>${escapeHtml(f.answer || '无')}</pre></div>
+                <div class="field"><div class="field-label">评价类型</div><div class="field-value">${f.rating === 'like' ? '👍 点赞' : '👎 点踩'}</div></div>
+                <div class="field"><div class="field-label">反馈时间</div><div class="field-value">${formatTime(f.created_at)}</div></div>
+            `;
+            document.getElementById('feedbackContextModal').classList.add('show');
+        }
+
+        // ==================== 反馈：完整上下文（首轮→当前轮） ====================
+        async function viewFeedbackContext(idx) {
+            const f = pageState.feedbacks.items[idx];
+            if (!f) return;
+
+            const sessionId = f.session_id || '';
+            if (!sessionId) {
+                document.getElementById('feedbackContextTitle').textContent = '完整上下文';
+                document.getElementById('feedbackContextContent').innerHTML = `
+                    <div class="empty-state"><p>该反馈未关联会话，无法获取上下文。</p></div>
+                `;
+                document.getElementById('feedbackContextModal').classList.add('show');
+                return;
+            }
+
             try {
-                const resp = await fetch('/api/chat/sessions?limit=100');
+                const resp = await fetch(`/api/chat/session/${encodeURIComponent(sessionId)}`);
+                const data = await resp.json();
+                const history = data.history || [];
+
+                if (history.length === 0) {
+                    document.getElementById('feedbackContextTitle').textContent = '完整上下文';
+                    document.getElementById('feedbackContextContent').innerHTML = `
+                        <div class="empty-state"><p>该会话暂无消息记录。</p></div>
+                    `;
+                    document.getElementById('feedbackContextModal').classList.add('show');
+                    return;
+                }
+
+                // 找到匹配的用户问题位置（取首次匹配，即最早的轮次）
+                const targetQuestion = (f.question || '').trim();
+                let matchIdx = -1;
+                for (let i = 0; i < history.length; i++) {
+                    if (history[i].role === 'user' && (history[i].content || '').trim() === targetQuestion) {
+                        matchIdx = i;
+                        break;
+                    }
+                }
+
+                // 截断：从首轮到当前轮（含 AI 回答）
+                let truncated;
+                if (matchIdx >= 0) {
+                    // 包含匹配的用户问题 + 紧随其后的 AI 回答
+                    const endIdx = Math.min(matchIdx + 2, history.length);
+                    truncated = history.slice(0, endIdx);
+                } else {
+                    // 未匹配到，展示全部历史并提示
+                    truncated = history;
+                }
+
+                let html = `<div class="field"><div class="field-label">会话ID</div><div class="field-value" style="font-size:13px;word-break:break-all;">${escapeHtml(sessionId)}</div></div>`;
+                html += `<div class="field"><div class="field-label">展示范围</div><div class="field-value">第 1 轮 ~ 第 ${Math.ceil(truncated.length / 2)} 轮（共 ${Math.ceil(history.length / 2)} 轮）</div></div>`;
+                if (matchIdx < 0) {
+                    html += `<div class="field"><div class="field-label">⚠️ 提示</div><div class="field-value" style="color:#e65100;">未精确匹配到该反馈对应的用户问题，已展示全部历史对话。</div></div>`;
+                }
+
+                truncated.forEach(msg => {
+                    const role = msg.role === 'user' ? '👤 用户' : '🤖 助手';
+                    const content = msg.content || msg.message || '';
+                    html += `<div class="field"><div class="field-label">${role}</div><pre>${escapeHtml(content)}</pre></div>`;
+                });
+
+                document.getElementById('feedbackContextTitle').textContent = '完整上下文';
+                document.getElementById('feedbackContextContent').innerHTML = html;
+                document.getElementById('feedbackContextModal').classList.add('show');
+            } catch(e) {
+                alert('加载完整上下文失败: ' + e.message);
+            }
+        }
+
+        function closeFeedbackContext() {
+            document.getElementById('feedbackContextModal').classList.remove('show');
+        }
+
+        // ==================== 会话列表 ====================
+        async function loadSessions(append) {
+            const ps = pageState.sessions;
+
+            if (!append) {
+                ps.offset = 0;
+            }
+
+            let url = `/api/chat/sessions?limit=${PAGE_SIZE}&offset=${ps.offset}`;
+
+            try {
+                const resp = await fetch(url);
                 const data = await resp.json();
                 const sessions = data.sessions || [];
+                ps.total = data.total || sessions.length;
+                let allSessions = sessions;
+                if (append) {
+                    // 追加：需要保留之前的 DOM，这里简单重新渲染（会话数量通常不多）
+                    // 使用一个缓存来追加
+                    ps._cached = (ps._cached || []).concat(sessions);
+                    allSessions = ps._cached;
+                } else {
+                    ps._cached = sessions;
+                }
 
-                if (sessions.length === 0) {
+                if (allSessions.length === 0) {
                     document.getElementById('sessionList').innerHTML = `
                         <div class="empty-state"><div class="icon">📭</div><p>暂无会话记录</p></div>
                     `;
@@ -575,7 +853,7 @@
                         <th>操作</th>
                     </tr></thead><tbody>`;
 
-                sessions.forEach(s => {
+                allSessions.forEach(s => {
                     const preview = s.last_message_preview || '（无预览）';
                     html += `<tr>
                         <td style="font-size:12px;">${escapeHtml(s.session_id.substring(0, 20))}...</td>
@@ -588,10 +866,16 @@
                 });
 
                 html += '</tbody></table>';
+                html += renderLoadMore('sessionList', allSessions.length, ps.total, 'loadSessionsMore()');
                 document.getElementById('sessionList').innerHTML = html;
             } catch(e) {
                 document.getElementById('sessionList').innerHTML = `<div class="empty-state"><p>加载失败: ${e.message}</p></div>`;
             }
+        }
+
+        function loadSessionsMore() {
+            pageState.sessions.offset += PAGE_SIZE;
+            loadSessions(true);
         }
 
         async function viewSessionDetail(sessionId) {
@@ -629,6 +913,101 @@
             document.getElementById('sessionDetailModal').classList.remove('show');
         }
 
+        // ==================== 全部（Bug + 反馈 时间线） ====================
+        async function loadAllTimeline(append) {
+            const ps = pageState.all;
+
+            if (!append) {
+                ps.offset = 0;
+            }
+
+            let url = `/api/admin/timeline?limit=${PAGE_SIZE}&offset=${ps.offset}`;
+
+            try {
+                const resp = await fetch(url);
+                const data = await resp.json();
+                const items = (data.data && data.data.items) || [];
+                ps.total = (data.data && data.data.total) || items.length;
+                let allItems = append ? (ps._cached || []).concat(items) : items;
+                ps._cached = allItems;
+
+                if (allItems.length === 0) {
+                    document.getElementById('allTimelineList').innerHTML = `
+                        <div class="empty-state"><div class="icon">📭</div><p>暂无记录</p></div>
+                    `;
+                    return;
+                }
+
+                let html = `<table>
+                    <thead><tr>
+                        <th>类型</th>
+                        <th>标题</th>
+                        <th>摘要</th>
+                        <th>时间</th>
+                        <th>操作</th>
+                    </tr></thead><tbody>`;
+
+                allItems.forEach(item => {
+                    const isBug = item.type === 'bug';
+                    const badgeClass = isBug ? 'badge-bug' : (item.rating === 'like' ? 'badge-feedback-like' : 'badge-feedback-dislike');
+                    const icon = isBug ? '🐞' : (item.rating === 'like' ? '👍' : '👎');
+                    const label = isBug ? 'Bug' : (item.rating === 'like' ? '点赞' : '点踩');
+                    const title = item.title || '（无标题）';
+                    const summary = item.summary || '';
+                    const timeStr = item.created_at ? formatTime(item.created_at) : '-';
+
+                    html += `<tr>
+                        <td><span class="badge ${badgeClass}">${icon} ${label}</span></td>
+                        <td><div class="cell-content" title="${escapeHtml(title)}">${escapeHtml(title)}</div></td>
+                        <td><div class="cell-content" title="${escapeHtml(summary)}">${escapeHtml(summary)}</div></td>
+                        <td style="font-size:12px;color:#888;">${timeStr}</td>
+                        <td>${isBug
+                            ? `<button class="detail-btn" onclick="viewBugDetail(${item.id})">详情</button>`
+                            : `<button class="detail-btn" onclick="viewTimelineFeedback(${item.id})">详情</button>`
+                        }</td>
+                    </tr>`;
+                });
+
+                html += '</tbody></table>';
+                html += renderLoadMore('allTimelineList', allItems.length, ps.total, 'loadAllTimelineMore()');
+                document.getElementById('allTimelineList').innerHTML = html;
+            } catch(e) {
+                document.getElementById('allTimelineList').innerHTML = `<div class="empty-state"><p>加载失败: ${e.message}</p></div>`;
+            }
+        }
+
+        function loadAllTimelineMore() {
+            pageState.all.offset += PAGE_SIZE;
+            loadAllTimeline(true);
+        }
+
+        async function viewTimelineFeedback(feedbackId) {
+            try {
+                const resp = await fetch(`/api/feedback/${feedbackId}`);
+                const data = await resp.json();
+                const f = data.data;
+                if (!f) {
+                    alert('反馈不存在');
+                    return;
+                }
+
+                document.getElementById('feedbackContextTitle').textContent = '反馈详情';
+                document.getElementById('feedbackContextContent').innerHTML = `
+                    <div class="field"><div class="field-label">ID</div><div class="field-value">#${f.id}</div></div>
+                    <div class="field"><div class="field-label">评价类型</div><div class="field-value">${f.rating === 'like' ? '👍 点赞' : '👎 点踩'}</div></div>
+                    <div class="field"><div class="field-label">👤 用户问题</div><pre>${escapeHtml(f.question || '无')}</pre></div>
+                    <div class="field"><div class="field-label">🤖 AI 回答</div><pre>${escapeHtml(f.answer || '无')}</pre></div>
+                    <div class="field"><div class="field-label">负反馈标签</div><div class="field-value">${(f.feedback_tags || []).join('、') || '无'}</div></div>
+                    <div class="field"><div class="field-label">详细描述</div><pre>${escapeHtml(f.feedback_description || '无')}</pre></div>
+                    <div class="field"><div class="field-label">关联会话ID</div><div class="field-value" style="font-size:13px;word-break:break-all;">${escapeHtml(f.session_id || '无')}</div></div>
+                    <div class="field"><div class="field-label">反馈时间</div><div class="field-value">${formatTime(f.created_at)}</div></div>
+                `;
+                document.getElementById('feedbackContextModal').classList.add('show');
+            } catch(e) {
+                alert('加载反馈详情失败: ' + e.message);
+            }
+        }
+
         // ==================== 工具函数 ====================
         function escapeHtml(text) {
             if (!text) return '';
@@ -654,9 +1033,158 @@
             return '/uploads/' + encodeURIComponent(filename);
         }
 
+        // ==================== 图表 ====================
+        let ratioChartInstance = null;
+        let trendChartInstance = null;
+
+        async function loadCharts() {
+            try {
+                const [feedbackStatsRes, bugStatsRes, feedbackTimelineRes, bugTimelineRes] = await Promise.all([
+                    fetch('/api/feedback/stats'),
+                    fetch('/api/bug/stats'),
+                    fetch('/api/feedback/timeline?days=30'),
+                    fetch('/api/bug/timeline?days=30')
+                ]);
+
+                const feedbackStats = (await feedbackStatsRes.json()).data || {};
+                const bugStats = (await bugStatsRes.json()).data || {};
+                const feedbackTimeline = (await feedbackTimelineRes.json()).data || {};
+                const bugTimeline = (await bugTimelineRes.json()).data || {};
+
+                renderRatioChart(feedbackStats, bugStats);
+                renderTrendChart(feedbackTimeline.timeline || [], bugTimeline.timeline || []);
+            } catch(e) {
+                console.error('加载图表失败:', e);
+            }
+        }
+
+        function renderRatioChart(feedbackStats, bugStats) {
+            const likes = feedbackStats.likes || 0;
+            const dislikes = feedbackStats.dislikes || 0;
+            const bugs = bugStats.total || 0;
+
+            if (ratioChartInstance) {
+                ratioChartInstance.destroy();
+            }
+
+            const ctx = document.getElementById('ratioChart').getContext('2d');
+            ratioChartInstance = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['👍 点赞', '👎 点踩', '🐞 Bug上报'],
+                    datasets: [{
+                        data: [likes, dislikes, bugs],
+                        backgroundColor: ['#34a853', '#ea4335', '#fbbc04'],
+                        borderWidth: 0,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { padding: 16, font: { size: 13 } }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(ctx) {
+                                    const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                                    const pct = total > 0 ? ((ctx.parsed / total) * 100).toFixed(1) : 0;
+                                    return ctx.label + ': ' + ctx.parsed + ' (' + pct + '%)';
+                                }
+                            }
+                        }
+                    },
+                    cutout: '60%'
+                }
+            });
+        }
+
+        function renderTrendChart(feedbackTimeline, bugTimeline) {
+            // 合并日期
+            const feedbackMap = {};
+            feedbackTimeline.forEach(item => { feedbackMap[item.date] = item; });
+            const bugMap = {};
+            bugTimeline.forEach(item => { bugMap[item.date] = item; });
+
+            const allDates = [...new Set([
+                ...feedbackTimeline.map(i => i.date),
+                ...bugTimeline.map(i => i.date)
+            ])].sort();
+
+            const labels = allDates.map(d => d.substring(5)); // MM-DD
+            const likesData = allDates.map(d => (feedbackMap[d] && feedbackMap[d].likes) || 0);
+            const dislikesData = allDates.map(d => (feedbackMap[d] && feedbackMap[d].dislikes) || 0);
+            const bugsData = allDates.map(d => (bugMap[d] && bugMap[d].bugs) || 0);
+
+            if (trendChartInstance) {
+                trendChartInstance.destroy();
+            }
+
+            const ctx = document.getElementById('trendChart').getContext('2d');
+            trendChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: '👍 点赞',
+                            data: likesData,
+                            borderColor: '#34a853',
+                            backgroundColor: 'rgba(52, 168, 83, 0.1)',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 2,
+                        },
+                        {
+                            label: '👎 点踩',
+                            data: dislikesData,
+                            borderColor: '#ea4335',
+                            backgroundColor: 'rgba(234, 67, 53, 0.1)',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 2,
+                        },
+                        {
+                            label: '🐞 Bug',
+                            data: bugsData,
+                            borderColor: '#fbbc04',
+                            backgroundColor: 'rgba(251, 188, 4, 0.1)',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 2,
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: { padding: 16, font: { size: 13 }, usePointStyle: true }
+                        },
+                    },
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            ticks: { font: { size: 11 }, maxTicksLimit: 15 }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: { precision: 0, font: { size: 11 } }
+                        }
+                    }
+                }
+            });
+        }
+
         // 页面加载时自动加载数据
         window.onload = function() {
             loadAll();
+            loadCharts();
         };
     </script>
 </body>

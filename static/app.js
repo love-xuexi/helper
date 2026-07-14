@@ -18,6 +18,7 @@ class SmartQAApp {
         this.currentChatHistory = [];
         this.chatHistories = this.loadChatHistories();
         this.isCurrentChatFromHistory = false;
+        this.userScrolledUp = false; // 用户是否手动向上滚动
 
         // 反馈相关
         this.feedbackTargetMessageId = null;
@@ -160,6 +161,15 @@ class SmartQAApp {
         this.bugSubmitBtn = document.getElementById('bugSubmitBtn');
 
         this.checkAndSetCentered();
+
+        // 监听滚动：用户向上滚动时停止自动滚动到底部
+        if (this.chatMessages) {
+            this.chatMessages.addEventListener('scroll', () => {
+                const { scrollTop, scrollHeight, clientHeight } = this.chatMessages;
+                const atBottom = scrollHeight - scrollTop - clientHeight < 60;
+                this.userScrolledUp = !atBottom;
+            });
+        }
     }
 
     // ==================== 事件绑定 ====================
@@ -185,12 +195,13 @@ class SmartQAApp {
             this.sendButton.addEventListener('click', () => this.sendMessage());
         }
         if (this.messageInput) {
-            this.messageInput.addEventListener('keypress', (e) => {
+            this.messageInput.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                     this.sendMessage();
                 }
             });
+            this.messageInput.addEventListener('input', () => this.autoResizeInput());
         }
 
         // 停止生成
@@ -333,6 +344,13 @@ class SmartQAApp {
 
     // ==================== 会话管理 ====================
 
+    clearMessages() {
+        // 只移除消息元素，保留欢迎界面
+        if (this.chatMessages) {
+            this.chatMessages.querySelectorAll('.message').forEach(el => el.remove());
+        }
+    }
+
     newChat() {
         if (this.isStreaming) {
             this.stopGeneration();
@@ -347,11 +365,18 @@ class SmartQAApp {
         }
 
         this.isStreaming = false;
-        if (this.messageInput) this.messageInput.value = '';
+        if (this.messageInput) {
+            this.messageInput.value = '';
+            this.autoResizeInput();
+        }
         this.currentChatHistory = [];
         this.isCurrentChatFromHistory = false;
+        this.userScrolledUp = false;
 
-        if (this.chatMessages) this.chatMessages.innerHTML = '';
+        if (this.chatMessages) {
+            // 保留欢迎界面，只移除消息元素
+            this.chatMessages.querySelectorAll('.message').forEach(el => el.remove());
+        }
         this.sessionId = this.generateSessionId();
         this.updateUI();
         this.checkAndSetCentered();
@@ -429,15 +454,33 @@ class SmartQAApp {
             const data = await response.json();
             const sessions = data.sessions || [];
             if (sessions.length === 0) return;
-            this.chatHistories = sessions.map(session => ({
-                id: session.session_id,
-                title: session.title || '新对话',
-                messages: [],
-                createdAt: session.created_at,
-                updatedAt: session.updated_at,
-                lastMessagePreview: session.last_message_preview || '',
-                messageCount: session.message_count || 0,
-            }));
+
+            const serverHistories = sessions.map(session => {
+                // 保留本地已有的 messages（含 citations / messageId），避免刷新后丢失
+                const localHistory = this.chatHistories.find(h => h.id === session.session_id);
+                return {
+                    id: session.session_id,
+                    title: session.title || '新对话',
+                    messages: localHistory ? localHistory.messages : [],
+                    createdAt: session.created_at,
+                    updatedAt: session.updated_at,
+                    lastMessagePreview: session.last_message_preview || '',
+                    messageCount: session.message_count || 0,
+                };
+            });
+
+            // 合并：服务端数据为主，保留本地有但服务端没有的对话
+            const serverIds = new Set(serverHistories.map(h => h.id));
+            const localOnly = this.chatHistories.filter(h => !serverIds.has(h.id));
+            this.chatHistories = [...localOnly, ...serverHistories];
+
+            // 按更新时间倒序排列
+            this.chatHistories.sort((a, b) => {
+                const ta = new Date(a.updatedAt || a.createdAt || 0).getTime();
+                const tb = new Date(b.updatedAt || b.createdAt || 0).getTime();
+                return tb - ta;
+            });
+
             this.saveChatHistories();
             this.renderChatHistory();
         } catch (error) {
@@ -453,6 +496,9 @@ class SmartQAApp {
         this.chatHistories.forEach((history) => {
             const historyItem = document.createElement('div');
             historyItem.className = 'history-item';
+            if (this.isCurrentChatFromHistory && this.sessionId === history.id) {
+                historyItem.classList.add('active');
+            }
             historyItem.dataset.historyId = history.id;
             historyItem.innerHTML = `
                 <div class="history-item-content">
@@ -493,51 +539,46 @@ class SmartQAApp {
             }
         }
 
-        try {
-            const response = await fetch(`/api/chat/session/${historyId}`);
-            if (response.ok) {
-                const data = await response.json();
-                const backendHistory = data.history || [];
-                this.sessionId = history.id;
-                this.isCurrentChatFromHistory = true;
+        // 优先使用本地消息（含 citations / messageId）；本地为空时回退到后端
+        let messagesToLoad = [];
+        if (history.messages && history.messages.length > 0) {
+            messagesToLoad = history.messages;
+        } else {
+            try {
+                const response = await fetch(`/api/chat/session/${historyId}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    const backendHistory = data.history || [];
+                    messagesToLoad = backendHistory.map(msg => ({
+                        type: msg.role === 'user' ? 'user' : 'assistant',
+                        content: msg.content,
+                        timestamp: msg.timestamp,
+                    }));
+                }
+            } catch (error) {
+                console.error('加载会话历史失败:', error);
+            }
+        }
 
-                if (this.chatMessages) {
-                    this.chatMessages.innerHTML = '';
-                    if (backendHistory.length > 0) {
-                        this.currentChatHistory = [];
-                        backendHistory.forEach(msg => {
-                            const messageType = msg.role === 'user' ? 'user' : 'assistant';
-                            this.addMessage(messageType, msg.content, false, false);
-                        });
-                    } else {
-                        this.currentChatHistory = [...history.messages];
-                        history.messages.forEach(msg => {
-                            this.addMessage(msg.type, msg.content, false, false);
-                        });
-                    }
-                }
-            } else {
-                this.sessionId = history.id;
-                this.currentChatHistory = [...history.messages];
-                this.isCurrentChatFromHistory = true;
-                if (this.chatMessages) {
-                    this.chatMessages.innerHTML = '';
-                    history.messages.forEach(msg => {
-                        this.addMessage(msg.type, msg.content, false, false);
-                    });
-                }
-            }
-        } catch (error) {
-            console.error('加载会话历史失败:', error);
-            this.sessionId = history.id;
-            this.currentChatHistory = [...history.messages];
-            this.isCurrentChatFromHistory = true;
-            if (this.chatMessages) {
-                this.chatMessages.innerHTML = '';
-                history.messages.forEach(msg => {
-                    this.addMessage(msg.type, msg.content, false, false);
-                });
-            }
+        this.sessionId = history.id;
+        this.isCurrentChatFromHistory = true;
+
+        if (this.chatMessages) {
+            this.clearMessages();
+            this.currentChatHistory = messagesToLoad.map(msg => ({
+                type: msg.type,
+                content: msg.content,
+                timestamp: msg.timestamp || new Date().toISOString(),
+                messageId: msg.messageId,
+                citations: msg.citations,
+            }));
+            messagesToLoad.forEach(msg => {
+                const options = msg.type === 'assistant' ? {
+                    messageId: msg.messageId,
+                    citations: msg.citations,
+                } : {};
+                this.addMessage(msg.type, msg.content, false, false, options);
+            });
         }
         this.checkAndSetCentered();
         this.renderChatHistory();
@@ -558,7 +599,9 @@ class SmartQAApp {
                 this.renderChatHistory();
                 if (this.sessionId === historyId) {
                     this.currentChatHistory = [];
-                    if (this.chatMessages) this.chatMessages.innerHTML = '';
+                    if (this.chatMessages) {
+                        this.clearMessages();
+                    }
                     this.sessionId = this.generateSessionId();
                     this.checkAndSetCentered();
                 }
@@ -574,6 +617,12 @@ class SmartQAApp {
 
     // ==================== 消息发送 ====================
 
+    autoResizeInput() {
+        if (!this.messageInput) return;
+        this.messageInput.style.height = 'auto';
+        this.messageInput.style.height = Math.min(this.messageInput.scrollHeight, 200) + 'px';
+    }
+
     async sendMessage() {
         let message = '';
         if (this.messageInput) {
@@ -588,8 +637,12 @@ class SmartQAApp {
             return;
         }
 
+        this.userScrolledUp = false; // 新消息重置滚动状态
         this.addMessage('user', message);
-        if (this.messageInput) this.messageInput.value = '';
+        if (this.messageInput) {
+            this.messageInput.value = '';
+            this.autoResizeInput();
+        }
 
         this.isStreaming = true;
         this.updateUI();
@@ -603,8 +656,12 @@ class SmartQAApp {
         } finally {
             this.isStreaming = false;
             this.updateUI();
-            if (this.isCurrentChatFromHistory && this.currentChatHistory.length > 0) {
-                this.updateCurrentChatHistory();
+            if (this.currentChatHistory.length > 0) {
+                if (this.isCurrentChatFromHistory) {
+                    this.updateCurrentChatHistory();
+                } else {
+                    this.saveCurrentChat();
+                }
                 this.renderChatHistory();
             }
         }
@@ -673,8 +730,10 @@ class SmartQAApp {
                                     fullResponse += content;
                                     const messageContent = assistantMessageElement.querySelector('.message-content');
                                     if (messageContent) {
-                                        messageContent.innerHTML = this.renderMarkdown(fullResponse);
-                                        this.highlightCodeBlocks(messageContent);
+                                        // 流式过程中用纯文本显示，避免不完整 Markdown 导致布局错乱
+                                        // 移除加载态的 flex 布局，改为纵向文本渲染
+                                        messageContent.classList.remove('loading-message-content');
+                                        messageContent.textContent = fullResponse;
                                         this.scrollToBottom();
                                     }
                                 } else if (sseMessage.type === 'done') {
@@ -699,8 +758,8 @@ class SmartQAApp {
                                     fullResponse += rawData;
                                     const messageContent = assistantMessageElement.querySelector('.message-content');
                                     if (messageContent) {
-                                        messageContent.innerHTML = this.renderMarkdown(fullResponse);
-                                        this.highlightCodeBlocks(messageContent);
+                                        messageContent.classList.remove('loading-message-content');
+                                        messageContent.textContent = fullResponse;
                                         this.scrollToBottom();
                                     }
                                 }
@@ -732,7 +791,7 @@ class SmartQAApp {
 
     // ==================== 消息渲染 ====================
 
-    addMessage(type, content, isStreaming = false, saveToHistory = true) {
+    addMessage(type, content, isStreaming = false, saveToHistory = true, options = {}) {
         const isFirstMessage = this.chatMessages && this.chatMessages.querySelectorAll('.message').length === 0;
 
         if (!isStreaming && saveToHistory && content) {
@@ -775,10 +834,18 @@ class SmartQAApp {
 
         if (this.chatMessages) {
             this.chatMessages.appendChild(messageDiv);
-            if (isFirstMessage && this.chatContainer) {
-                this.chatContainer.classList.remove('centered');
-            }
+            this.checkAndSetCentered();
             this.scrollToBottom();
+        }
+
+        // 加载历史消息时渲染引用来源和反馈按钮
+        if (type === 'assistant' && !isStreaming) {
+            if (options.citations && options.citations.length > 0) {
+                this.renderCitations(messageDiv, options.citations);
+            }
+            if (options.messageId) {
+                this.renderFeedbackButtons(messageDiv, options.messageId, options.citations || []);
+            }
         }
 
         return messageDiv;
@@ -809,10 +876,7 @@ class SmartQAApp {
 
         if (this.chatMessages) {
             this.chatMessages.appendChild(messageDiv);
-            const isFirstMessage = this.chatMessages.querySelectorAll('.message').length === 1;
-            if (isFirstMessage && this.chatContainer) {
-                this.chatContainer.classList.remove('centered');
-            }
+            this.checkAndSetCentered();
             this.scrollToBottom();
         }
 
@@ -844,12 +908,14 @@ class SmartQAApp {
         const citationsHeader = document.createElement('div');
         citationsHeader.className = 'citations-header';
         citationsHeader.innerHTML = `
+            <svg class="citations-chevron" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
             <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M9 18V5L21 3V16M9 18C9 19.6569 7.65685 21 6 21C4.34315 21 3 19.6569 3 18C3 16.3431 4.34315 15 6 15C7.65685 15 9 16.3431 9 18ZM21 13C21 14.6569 19.6569 16 18 16C16.3431 16 15 14.6569 15 13C15 11.3431 16.3431 10 18 10C19.6569 10 21 11.3431 21 13Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
             <span>引用来源（${citations.length}）</span>
         `;
-        citationsContainer.appendChild(citationsHeader);
 
         const citationsList = document.createElement('div');
         citationsList.className = 'citations-list';
@@ -868,8 +934,18 @@ class SmartQAApp {
             citationsList.appendChild(citationItem);
         });
 
+        citationsContainer.appendChild(citationsHeader);
         citationsContainer.appendChild(citationsList);
         messageContentWrapper.appendChild(citationsContainer);
+
+        // 默认折叠，点击 header 切换展开/收起
+        citationsHeader.addEventListener('click', () => {
+            const isExpanded = citationsContainer.classList.toggle('expanded');
+            const chevron = citationsHeader.querySelector('.citations-chevron');
+            if (chevron) {
+                chevron.style.transform = isExpanded ? 'rotate(90deg)' : 'rotate(0deg)';
+            }
+        });
     }
 
     renderFeedbackButtons(messageElement, messageId, citations) {
@@ -985,28 +1061,25 @@ class SmartQAApp {
             });
             if (this.isCurrentChatFromHistory) {
                 this.updateCurrentChatHistory();
-                this.renderChatHistory();
+            } else {
+                this.saveCurrentChat();
             }
-            this.loadServerChatHistories();
+            this.renderChatHistory();
         }
     }
 
     checkAndSetCentered() {
-        if (this.chatMessages && this.chatContainer) {
+        if (this.chatMessages && this.welcomeScreen) {
             const hasMessages = this.chatMessages.querySelectorAll('.message').length > 0;
-            if (!hasMessages) {
-                this.chatContainer.classList.add('centered');
-                if (this.welcomeScreen) this.welcomeScreen.style.display = 'flex';
-            } else {
-                this.chatContainer.classList.remove('centered');
-                if (this.welcomeScreen) this.welcomeScreen.style.display = 'none';
-            }
+            this.welcomeScreen.style.display = hasMessages ? 'none' : 'flex';
         }
     }
 
     scrollToBottom() {
-        if (this.chatMessages) {
-            this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+        if (this.chatMessages && !this.userScrolledUp) {
+            requestAnimationFrame(() => {
+                this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+            });
         }
     }
 

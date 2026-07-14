@@ -65,10 +65,13 @@ class FeedbackStore:
                     feedback_description TEXT NOT NULL DEFAULT '',
                     chunk_ids TEXT NOT NULL DEFAULT '[]',
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    user_id TEXT NOT NULL DEFAULT ''
                 )
                 """
             )
+            # 兼容已存在的旧表：补 user_id 列
+            self._ensure_column(conn, "feedback", "user_id", "TEXT NOT NULL DEFAULT ''")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_feedback_session ON feedback(session_id)"
             )
@@ -81,8 +84,18 @@ class FeedbackStore:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback(created_at DESC)"
             )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedback(user_id)"
+            )
         self._initialized = True
         logger.info(f"[FeedbackStore] 数据库初始化完成: {self.db_path}")
+
+    @staticmethod
+    def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+        """安全地为已存在的表补充列（幂等）。"""
+        cols = [row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def _get_conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -99,8 +112,9 @@ class FeedbackStore:
         feedback_tags: list[str] | None = None,
         feedback_description: str = "",
         chunk_ids: list[str] | None = None,
+        user_id: str = "",
     ) -> dict[str, Any]:
-        """提交一条反馈。"""
+        """提交一条反馈。同一 message_id 只保留最新一条（upsert）。"""
         if rating not in ("like", "dislike"):
             raise ValueError("rating 必须是 'like' 或 'dislike'")
 
@@ -109,18 +123,25 @@ class FeedbackStore:
         chunks_json = json.dumps(chunk_ids or [], ensure_ascii=False)
 
         with self._lock, self._get_conn() as conn:
+            # 删除同一 message_id 的旧反馈，确保最新评价为准
+            deleted = conn.execute(
+                "DELETE FROM feedback WHERE message_id = ?", (message_id,)
+            ).rowcount
+            if deleted > 0:
+                logger.info(f"[FeedbackStore] 覆盖旧反馈: message_id={message_id}, deleted={deleted}")
+
             cursor = conn.execute(
                 """
                 INSERT INTO feedback (
                     session_id, message_id, question, answer, rating,
                     feedback_tags, feedback_description, chunk_ids,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    created_at, updated_at, user_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id, message_id, question, answer, rating,
                     tags_json, feedback_description, chunks_json,
-                    now, now,
+                    now, now, user_id,
                 ),
             )
             feedback_id = cursor.lastrowid
@@ -142,19 +163,49 @@ class FeedbackStore:
         limit: int = 50,
         offset: int = 0,
         rating: str | None = None,
+        user_id: str | None = None,
+        tag: str | None = None,
     ) -> list[dict[str, Any]]:
         """列出反馈（按时间倒序）。"""
-        query = "SELECT * FROM feedback"
+        query = "SELECT * FROM feedback WHERE 1=1"
         params: list[Any] = []
         if rating:
-            query += " WHERE rating = ?"
+            query += " AND rating = ?"
             params.append(rating)
+        if user_id is not None:
+            query += " AND user_id = ?"
+            params.append(user_id)
+        if tag:
+            # feedback_tags 存储为 JSON 数组，用 LIKE 匹配标签字符串
+            query += " AND feedback_tags LIKE ?"
+            params.append(f'%"{tag}"%')
         query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
         with self._get_conn() as conn:
             rows = conn.execute(query, params).fetchall()
         return [self._row_to_dict(row) for row in rows]
+
+    def count_feedback(
+        self,
+        rating: str | None = None,
+        user_id: str | None = None,
+        tag: str | None = None,
+    ) -> int:
+        """统计反馈总数（可按评分/用户/标签过滤）。"""
+        query = "SELECT COUNT(*) FROM feedback WHERE 1=1"
+        params: list[Any] = []
+        if rating:
+            query += " AND rating = ?"
+            params.append(rating)
+        if user_id is not None:
+            query += " AND user_id = ?"
+            params.append(user_id)
+        if tag:
+            query += " AND feedback_tags LIKE ?"
+            params.append(f'%"{tag}"%')
+        with self._get_conn() as conn:
+            return conn.execute(query, params).fetchone()[0]
 
     def get_feedback_by_message_id(self, message_id: str) -> dict[str, Any] | None:
         """根据 message_id 获取反馈（用于前端查已评价状态）。"""
@@ -197,6 +248,46 @@ class FeedbackStore:
             conn.commit()
             return cursor.rowcount > 0
 
+    def get_timeline(self, days: int = 30) -> list[dict[str, Any]]:
+        """获取按天聚合的反馈时间序列数据。
+
+        返回格式: [{"date": "2026-07-01", "likes": 5, "dislikes": 2}, ...]
+        """
+        from datetime import datetime, timedelta
+
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days - 1)
+
+        # 初始化日期范围
+        date_map: dict[str, dict[str, int]] = {}
+        for i in range(days):
+            d = (start_date + timedelta(days=i)).strftime("%Y-%m-%d")
+            date_map[d] = {"likes": 0, "dislikes": 0}
+
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT created_at, rating FROM feedback
+                WHERE created_at >= ?
+                """,
+                (start_date.isoformat(),),
+            ).fetchall()
+
+        for row in rows:
+            created_at = row["created_at"]
+            try:
+                d = datetime.fromisoformat(created_at).strftime("%Y-%m-%d")
+            except (ValueError, TypeError):
+                continue
+            if d not in date_map:
+                continue
+            if row["rating"] == "like":
+                date_map[d]["likes"] += 1
+            elif row["rating"] == "dislike":
+                date_map[d]["dislikes"] += 1
+
+        return [{"date": d, **counts} for d, counts in sorted(date_map.items())]
+
     @staticmethod
     def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
         return {
@@ -211,6 +302,7 @@ class FeedbackStore:
             "chunk_ids": json.loads(row["chunk_ids"]),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
+            "user_id": row["user_id"],
         }
 
 
@@ -233,6 +325,7 @@ class FeedbackService:
         feedback_tags: list[str] | None = None,
         feedback_description: str = "",
         chunk_ids: list[str] | None = None,
+        user_id: str = "",
     ) -> dict[str, Any]:
         """提交反馈并（可选）推送到外部 API。"""
         result = self.store.submit_feedback(
@@ -244,6 +337,7 @@ class FeedbackService:
             feedback_tags=feedback_tags,
             feedback_description=feedback_description,
             chunk_ids=chunk_ids,
+            user_id=user_id,
         )
 
         # 可选：推送到外部 API
@@ -258,12 +352,30 @@ class FeedbackService:
         return self.store.get_feedback_by_message_id(message_id)
 
     def list_feedback(
-        self, limit: int = 50, offset: int = 0, rating: str | None = None
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        rating: str | None = None,
+        user_id: str | None = None,
+        tag: str | None = None,
     ) -> list[dict[str, Any]]:
-        return self.store.list_feedback(limit=limit, offset=offset, rating=rating)
+        return self.store.list_feedback(
+            limit=limit, offset=offset, rating=rating, user_id=user_id, tag=tag
+        )
+
+    def count_feedback(
+        self,
+        rating: str | None = None,
+        user_id: str | None = None,
+        tag: str | None = None,
+    ) -> int:
+        return self.store.count_feedback(rating=rating, user_id=user_id, tag=tag)
 
     def get_stats(self) -> dict[str, Any]:
         return self.store.get_stats()
+
+    def get_timeline(self, days: int = 30) -> list[dict[str, Any]]:
+        return self.store.get_timeline(days=days)
 
     async def _push_to_external(self, feedback: dict[str, Any]) -> None:
         """如果配置了外部 API，推送反馈数据。"""

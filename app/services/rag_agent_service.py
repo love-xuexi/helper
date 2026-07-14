@@ -32,7 +32,6 @@ from app.core.llm_factory import llm_factory
 from app.core.session_persistence import session_persistence_manager
 from app.services.kb_api_client import RetrievedChunk, RetrievalResult, kb_api_client
 
-
 # 需要知识库检索的关键词（命中则走 RAG，否则直接回答）
 _KB_KEYWORDS = [
     "投保", "寿险", "保险", "规则", "体检", "核保", "理赔", "保额", "风险",
@@ -55,7 +54,8 @@ def _needs_knowledge_retrieval(question: str) -> bool:
     greetings = ["你好", "hello", "hi", "谢谢", " thanks", "你是谁", "再见", "拜拜"]
     if any(q.startswith(g) for g in greetings):
         return False
-    return any(kw in q for kw in _KB_KEYWORDS)
+    return True
+    # return any(kw in q for kw in _KB_KEYWORDS)
 
 
 class RagAgentService:
@@ -99,7 +99,7 @@ class RagAgentService:
 
             2. **标注引用来源**：当回答中引用了参考资料的内容时，在相关语句末尾用 [1]、[2] 等方括号序号标注，序号与「参考资料」的编号一一对应。多条信息合并陈述时，标注所有相关编号如 [1][3]。
 
-            3. **无法回答时**：如果参考资料中没有包含用户问题的答案，请直接回答「根据现有知识库无法回答该问题。」，不要编造答案，不要使用参考资料之外的知识进行补充。
+            3. **无法回答时**：如果参考资料中没有包含用户问题的答案，请直接回答「抱歉，当前知识库中没有找到相关信息。您可以尝试以下方式：\n1. 换一种关键词重新提问\n2. 通过下方「点踩」或右上方「上报Bug」功能进行反馈」，不要编造答案，不要使用参考资料之外的知识进行补充。
 
             4. **禁止编造**：严禁编造任何不在参考资料中的信息、数据、规则、政策、条款或数字。宁可说"参考资料中未提及"也不要猜测。
 
@@ -354,9 +354,31 @@ class RagAgentService:
             content = msg.content if hasattr(msg, "content") else str(msg)
             if not content:
                 continue
+            # 从完整 user prompt 中提取用户实际问题
+            if role == "user":
+                content = self._extract_user_question(content)
             timestamp = getattr(msg, "timestamp", None) or datetime.now().isoformat()
             history.append({"role": role, "content": content, "timestamp": timestamp})
         return history
+
+    @staticmethod
+    def _extract_user_question(content: str) -> str:
+        """从 _build_user_message 生成的完整 prompt 中提取用户实际问题。
+
+        _build_user_message 格式:
+            请基于以下参考资料回答我的问题。
+
+            {context}
+
+            ---
+            我的问题：{question}
+
+        无参考资料时直接返回 question。
+        """
+        marker = "我的问题："
+        if marker in content:
+            return content.split(marker)[-1].strip()
+        return content
 
     def clear_session(self, session_id: str) -> bool:
         """清空会话历史。"""

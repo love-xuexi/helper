@@ -54,6 +54,8 @@ class ChatSessionSummary(BaseModel):
 
 class ChatSessionListResponse(BaseModel):
     total: int = Field(..., description="会话总数")
+    limit: int = Field(..., description="每页数量")
+    offset: int = Field(..., description="偏移量")
     sessions: List[ChatSessionSummary] = Field(default_factory=list, description="会话列表")
 
 

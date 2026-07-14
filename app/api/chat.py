@@ -161,11 +161,21 @@ async def clear_session(request: ClearRequest):
 
 
 @router.get("/chat/sessions", response_model=ChatSessionListResponse)
-async def list_chat_sessions(limit: int = 50) -> ChatSessionListResponse:
+async def list_chat_sessions(
+    limit: int = 10,
+    offset: int = 0,
+    user_id: str | None = None,
+) -> ChatSessionListResponse:
     try:
         safe_limit = max(1, min(limit, 100))
-        sessions = session_persistence_manager.list_chat_sessions(limit=safe_limit)
-        return ChatSessionListResponse(total=len(sessions), sessions=sessions)
+        safe_offset = max(0, offset)
+        sessions = session_persistence_manager.list_chat_sessions(
+            limit=safe_limit, offset=safe_offset, user_id=user_id
+        )
+        total = session_persistence_manager.count_chat_sessions(user_id=user_id)
+        return ChatSessionListResponse(
+            total=total, limit=safe_limit, offset=safe_offset, sessions=sessions
+        )
     except Exception as e:
         logger.error(f"获取会话列表错误: {e}")
         raise HTTPException(status_code=500, detail=str(e))

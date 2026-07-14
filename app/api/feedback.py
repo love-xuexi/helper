@@ -67,6 +67,7 @@ async def submit_feedback(request: FeedbackRequest) -> FeedbackResponse:
             feedback_tags=request.feedback_tags,
             feedback_description=request.feedback_description or "",
             chunk_ids=request.chunk_ids,
+            user_id=request.user_id or "",
         )
         logger.info(f"[Feedback] 反馈提交成功: id={result['id']}, rating={request.rating}")
         return FeedbackResponse(
@@ -86,16 +87,20 @@ async def list_feedback(
     limit: int = Query(50, ge=1, le=200, description="每页数量"),
     offset: int = Query(0, ge=0, description="偏移量"),
     rating: str | None = Query(None, description="按评分过滤: like / dislike"),
+    user_id: str | None = Query(None, description="按用户 ID 过滤（用户隔离钩子，当前可空）"),
+    tag: str | None = Query(None, description="按负反馈标签过滤"),
 ) -> FeedbackListResponse:
     """列出反馈（按时间倒序）。"""
     try:
         if rating and rating not in ("like", "dislike"):
             raise HTTPException(status_code=400, detail="rating 必须是 'like' 或 'dislike'")
 
-        items = feedback_service.list_feedback(limit=limit, offset=offset, rating=rating)
-        stats = feedback_service.get_stats()
+        items = feedback_service.list_feedback(
+            limit=limit, offset=offset, rating=rating, user_id=user_id, tag=tag
+        )
+        total = feedback_service.count_feedback(rating=rating, user_id=user_id, tag=tag)
         return FeedbackListResponse(
-            total=stats["total"],
+            total=total,
             limit=limit,
             offset=offset,
             items=items,
@@ -120,6 +125,23 @@ async def get_feedback_stats() -> FeedbackStatsResponse:
     except Exception as e:
         logger.error(f"[Feedback] 获取统计失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取统计失败: {e}")
+
+
+@router.get("/feedback/timeline", response_model=FeedbackStatsResponse)
+async def get_feedback_timeline(
+    days: int = Query(30, ge=1, le=365, description="统计天数"),
+) -> FeedbackStatsResponse:
+    """获取反馈时间序列数据（按天聚合，用于折线图）。"""
+    try:
+        timeline = feedback_service.get_timeline(days=days)
+        return FeedbackStatsResponse(
+            status="success",
+            message="获取时间序列成功",
+            data={"timeline": timeline, "days": days},
+        )
+    except Exception as e:
+        logger.error(f"[Feedback] 获取时间序列失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取时间序列失败: {e}")
 
 
 @router.get("/feedback/message/{message_id}", response_model=FeedbackResponse)

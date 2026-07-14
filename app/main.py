@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from app.api import bug, chat, feedback, file, health
+from app.api import admin  # 管理后台聚合接口（Bug + 反馈时间线等）
 from app.api import aiops  # AIOps 模块（预留，需 MCP 服务支持）
 from app.config import config
 from app.core.session_persistence import session_persistence_manager
@@ -79,6 +80,7 @@ app.include_router(chat.router, prefix="/api", tags=["对话"])
 app.include_router(file.router, prefix="/api", tags=["文件与知识库管理"])
 app.include_router(feedback.router, prefix="/api", tags=["反馈评价"])
 app.include_router(bug.router, prefix="/api", tags=["Bug上报"])
+app.include_router(admin.router, prefix="/api", tags=["管理后台"])
 app.include_router(aiops.router, prefix="/api", tags=["AIOps智能运维"])
 
 # 挂载静态文件

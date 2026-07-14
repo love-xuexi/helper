@@ -44,6 +44,8 @@ class FeedbackRequest(BaseModel):
     feedback_tags: Optional[List[str]] = Field(None, description="负反馈标签列表", alias="feedbackTags")
     feedback_description: Optional[str] = Field("", description="详细描述", alias="feedbackDescription")
     chunk_ids: Optional[List[str]] = Field(None, description="关联知识片段 ID 列表", alias="chunkIds")
+    # 用户隔离钩子：当前开发阶段为空字符串，后续接入用户体系后由前端传入
+    user_id: Optional[str] = Field("", description="用户 ID", alias="userId")
 
     class Config:
         populate_by_name = True
@@ -56,7 +58,8 @@ class FeedbackRequest(BaseModel):
                 "answer": "根据参考资料...",
                 "feedbackTags": ["回答不准确", "逻辑不清晰"],
                 "feedbackDescription": "回答中提到的体检标准和实际不符",
-                "chunkIds": ["859cffd18e948c98"]
+                "chunkIds": ["859cffd18e948c98"],
+                "userId": ""
             }
         }
 
