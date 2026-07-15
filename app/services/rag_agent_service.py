@@ -182,10 +182,10 @@ class RagAgentService:
         if not context:
             return question
         return (
-            f"请基于以下参考资料回答我的问题。\n\n"
+            f"请基于以下参考资料回答用户的问题。\n\n"
             f"{context}\n\n"
             f"---\n"
-            f"我的问题：{question}"
+            f"用户的问题：{question}"
         )
 
     # ----------------------------------------------------------------
@@ -312,15 +312,26 @@ class RagAgentService:
     # 会话历史管理
     # ----------------------------------------------------------------
     async def get_session_history_async(self, session_id: str) -> list[dict[str, str]]:
-        """获取会话历史消息（跳过 SystemMessage / ToolMessage）。"""
+        """获取会话历史消息（跳过 SystemMessage / ToolMessage）。
+
+        优先从 SQLite 持久化存储读取（重启后仍可用）；
+        若 SQLite 无记录（如 postgres 后端或旧会话），回退到 checkpointer。
+        """
         try:
+            # 优先从 SQLite 读取持久化消息
+            persisted = session_persistence_manager.get_session_messages(session_id)
+            if persisted:
+                logger.info(f"获取会话历史(SQLite): {session_id}, 消息数量: {len(persisted)}")
+                return persisted
+
+            # 回退到 checkpointer（postgres 后端或当前运行时的内存会话）
             cfg = {"configurable": {"thread_id": session_id}}
             if hasattr(self.checkpointer, "aget"):
                 checkpoint_tuple = await self.checkpointer.aget(cfg)
             else:
                 checkpoint_tuple = self.checkpointer.get(cfg)
             history = self._checkpoint_to_history(checkpoint_tuple)
-            logger.info(f"获取会话历史: {session_id}, 消息数量: {len(history)}")
+            logger.info(f"获取会话历史(checkpointer): {session_id}, 消息数量: {len(history)}")
             return history
         except Exception as e:
             logger.error(f"获取会话历史失败: {session_id}, 错误: {e}")
@@ -366,16 +377,16 @@ class RagAgentService:
         """从 _build_user_message 生成的完整 prompt 中提取用户实际问题。
 
         _build_user_message 格式:
-            请基于以下参考资料回答我的问题。
+            请基于以下参考资料回答用户的问题。
 
             {context}
 
             ---
-            我的问题：{question}
+            用户的问题：{question}
 
         无参考资料时直接返回 question。
         """
-        marker = "我的问题："
+        marker = "用户的问题："
         if marker in content:
             return content.split(marker)[-1].strip()
         return content

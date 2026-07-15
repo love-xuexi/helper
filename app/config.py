@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     # 会话持久化配置
     session_checkpoint_backend: str = "memory"
     postgres_dsn: str = ""
+    # 会话元数据 + 消息记录的 SQLite 路径（memory 后端使用，重启后保留）
+    session_db_path: str = "./data/chat_sessions.db"
     postgres_pool_min_size: int = 1
     postgres_pool_max_size: int = 5
     postgres_connect_timeout_seconds: float = 10.0

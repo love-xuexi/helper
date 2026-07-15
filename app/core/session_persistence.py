@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import sqlite3
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -21,6 +23,9 @@ class ChatSessionMetadata:
     updated_at: datetime | None = None
     # 用户隔离钩子：当前开发阶段为空字符串，后续接入用户体系后由调用方传入
     user_id: str = ""
+    # 原始问答内容，供 SQLite 消息表持久化使用
+    question: str = ""
+    answer: str = ""
 
     @classmethod
     def from_message(
@@ -38,6 +43,8 @@ class ChatSessionMetadata:
             last_message_preview=preview,
             message_count=2,
             user_id=user_id,
+            question=question,
+            answer=answer,
         )
 
 
@@ -109,6 +116,180 @@ class InMemorySessionStore:
     def clear(self) -> None:
         with self._lock:
             self._sessions.clear()
+
+
+class SqliteSessionStore:
+    """SQLite 会话存储（元数据 + 消息记录）。
+
+    持久化会话元数据和逐条消息，进程重启后数据保留。
+    与 BugStore/FeedbackStore 的 SQLite 模式保持一致。
+    """
+
+    def __init__(self, db_path: str) -> None:
+        self.db_path = db_path
+        self._lock = threading.Lock()
+        self._initialized = False
+
+    def initialize(self) -> None:
+        """创建数据库表（幂等）。"""
+        if self._initialized:
+            return
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        with self._lock, self._get_conn() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chat_sessions (
+                    session_id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL DEFAULT '新对话',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    last_message_preview TEXT NOT NULL DEFAULT '',
+                    message_count INTEGER NOT NULL DEFAULT 0,
+                    user_id TEXT NOT NULL DEFAULT ''
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated_at ON chat_sessions(updated_at DESC)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON chat_sessions(user_id)"
+            )
+        self._initialized = True
+        logger.info(f"[SqliteSessionStore] 数据库初始化完成: {self.db_path}")
+
+    def _get_conn(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def upsert_session(self, metadata: ChatSessionMetadata) -> None:
+        """Upsert 会话元数据，并追加本轮 user/assistant 两条消息。"""
+        now = datetime.now().isoformat()
+        with self._lock, self._get_conn() as conn:
+            existing = conn.execute(
+                "SELECT title, message_count FROM chat_sessions WHERE session_id = ?",
+                (metadata.session_id,),
+            ).fetchone()
+
+            if existing is None:
+                title = metadata.title or "新对话"
+                message_count = metadata.message_count
+                conn.execute(
+                    """
+                    INSERT INTO chat_sessions (
+                        session_id, title, created_at, updated_at,
+                        last_message_preview, message_count, user_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        metadata.session_id, title, now, now,
+                        metadata.last_message_preview, message_count, metadata.user_id,
+                    ),
+                )
+            else:
+                # 保留首轮标题；只在原标题为空/「新对话」时才用新标题覆盖
+                title = existing["title"]
+                if title in ("", "新对话") and metadata.title:
+                    title = metadata.title
+                message_count = existing["message_count"] + metadata.message_count
+                conn.execute(
+                    """
+                    UPDATE chat_sessions SET
+                        title = ?, updated_at = ?,
+                        last_message_preview = ?, message_count = ?, user_id = ?
+                    WHERE session_id = ?
+                    """,
+                    (
+                        title, now,
+                        metadata.last_message_preview, message_count,
+                        metadata.user_id or "",
+                        metadata.session_id,
+                    ),
+                )
+
+            # 追加本轮消息记录
+            if metadata.question:
+                conn.execute(
+                    "INSERT INTO chat_messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+                    (metadata.session_id, "user", metadata.question, now),
+                )
+            if metadata.answer:
+                conn.execute(
+                    "INSERT INTO chat_messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+                    (metadata.session_id, "assistant", metadata.answer, now),
+                )
+            conn.commit()
+
+    def list_sessions(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        query = "SELECT * FROM chat_sessions"
+        params: list[Any] = []
+        if user_id is not None:
+            query += " WHERE user_id = ?"
+            params.append(user_id)
+        query += " ORDER BY updated_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        with self._get_conn() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [self._session_row_to_dict(row) for row in rows]
+
+    def count_sessions(self, user_id: str | None = None) -> int:
+        query = "SELECT COUNT(*) FROM chat_sessions"
+        params: list[Any] = []
+        if user_id is not None:
+            query += " WHERE user_id = ?"
+            params.append(user_id)
+        with self._get_conn() as conn:
+            return conn.execute(query, params).fetchone()[0]
+
+    def get_messages(self, session_id: str) -> list[dict[str, str]]:
+        """获取会话的全部消息记录（按时间正序）。"""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT role, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id ASC",
+                (session_id,),
+            ).fetchall()
+        return [
+            {"role": row["role"], "content": row["content"], "timestamp": row["created_at"]}
+            for row in rows
+        ]
+
+    def delete_session(self, session_id: str) -> None:
+        with self._lock, self._get_conn() as conn:
+            conn.execute("DELETE FROM chat_sessions WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
+            conn.commit()
+
+    @staticmethod
+    def _session_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "session_id": row["session_id"],
+            "title": row["title"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "last_message_preview": row["last_message_preview"],
+            "message_count": row["message_count"],
+            "user_id": row["user_id"],
+        }
 
 
 class PostgresSessionStore:
@@ -237,15 +418,18 @@ class SessionPersistenceManager:
         self.checkpointer: Any = MemorySaver()
         self.session_store: PostgresSessionStore | None = None
         self.in_memory_store: InMemorySessionStore | None = None
+        self.sqlite_store: SqliteSessionStore | None = None
         self._checkpoint_context: Any = None
         self._connection: Any = None
 
     def initialize(self) -> None:
         if self.backend == "memory":
             self.checkpointer = MemorySaver()
-            self.in_memory_store = InMemorySessionStore()
+            self.in_memory_store = None
+            self.sqlite_store = SqliteSessionStore(self.settings.session_db_path)
+            self.sqlite_store.initialize()
             self.session_store = None
-            logger.info("[SessionPersistence] 使用内存会话 checkpoint")
+            logger.info("[SessionPersistence] 使用内存 checkpoint + SQLite 会话存储")
             return
 
         if self.backend != "postgres":
@@ -259,9 +443,11 @@ class SessionPersistenceManager:
     async def initialize_async(self) -> None:
         if self.backend == "memory":
             self.checkpointer = MemorySaver()
-            self.in_memory_store = InMemorySessionStore()
+            self.in_memory_store = None
+            self.sqlite_store = SqliteSessionStore(self.settings.session_db_path)
+            self.sqlite_store.initialize()
             self.session_store = None
-            logger.info("[SessionPersistence] 使用内存会话 checkpoint")
+            logger.info("[SessionPersistence] 使用内存 checkpoint + SQLite 会话存储")
             return
 
         if self.backend != "postgres":
@@ -316,6 +502,9 @@ class SessionPersistenceManager:
         metadata = ChatSessionMetadata.from_message(
             session_id=session_id, question=question, answer=answer, user_id=user_id
         )
+        if self.sqlite_store is not None:
+            self.sqlite_store.upsert_session(metadata)
+            return
         if self.session_store is not None:
             self.session_store.upsert_session(metadata)
             return
@@ -328,6 +517,8 @@ class SessionPersistenceManager:
         offset: int = 0,
         user_id: str | None = None,
     ) -> list[dict[str, Any]]:
+        if self.sqlite_store is not None:
+            return self.sqlite_store.list_sessions(limit=limit, offset=offset, user_id=user_id)
         if self.session_store is not None:
             return self.session_store.list_sessions(limit=limit, offset=offset, user_id=user_id)
         if self.in_memory_store is not None:
@@ -335,13 +526,23 @@ class SessionPersistenceManager:
         return []
 
     def count_chat_sessions(self, user_id: str | None = None) -> int:
+        if self.sqlite_store is not None:
+            return self.sqlite_store.count_sessions(user_id=user_id)
         if self.session_store is not None:
             return self.session_store.count_sessions(user_id=user_id)
         if self.in_memory_store is not None:
             return self.in_memory_store.count_sessions(user_id=user_id)
         return 0
 
+    def get_session_messages(self, session_id: str) -> list[dict[str, str]]:
+        """获取会话的持久化消息记录（仅 SQLite 后端可用）。"""
+        if self.sqlite_store is not None:
+            return self.sqlite_store.get_messages(session_id)
+        return []
+
     def delete_chat_session(self, session_id: str) -> None:
+        if self.sqlite_store is not None:
+            self.sqlite_store.delete_session(session_id)
         if self.session_store is not None:
             self.session_store.delete_session(session_id)
         if self.in_memory_store is not None:
