@@ -37,9 +37,12 @@ class SmartQAApp {
         this.initMarkdown();
         this.updateUI();
         this.checkAndSetCentered();
+        
+
         this.renderChatHistory();
         this.loadServerChatHistories();
         this.loadFeedbackTags();
+        this.loadSuggestions();
     }
 
     // ==================== Markdown 配置 ====================
@@ -179,16 +182,22 @@ class SmartQAApp {
             this.newChatBtn.addEventListener('click', () => this.newChat());
         }
 
-        // 建议卡片
-        document.querySelectorAll('.suggestion-card').forEach(card => {
-            card.addEventListener('click', () => {
-                const question = card.getAttribute('data-question');
-                if (question && this.messageInput) {
-                    this.messageInput.value = question;
-                    this.sendMessage();
+        
+
+        // 建议卡片（事件委托，支持动态渲染的卡片）
+        const suggestionsContainer = document.querySelector('.welcome-suggestions');
+        if (suggestionsContainer) {
+            suggestionsContainer.addEventListener('click', (e) => {
+                const card = e.target.closest('.suggestion-card');
+                if (card) {
+                    const question = card.getAttribute('data-question');
+                    if (question && this.messageInput) {
+                        this.messageInput.value = question;
+                        this.sendMessage();
+                    }
                 }
             });
-        });
+        }
 
         // 发送
         if (this.sendButton) {
@@ -439,11 +448,6 @@ class SmartQAApp {
         const history = this.chatHistories[existingIndex];
         history.messages = [...this.currentChatHistory];
         history.updatedAt = new Date().toISOString();
-        const firstUserMessage = this.currentChatHistory.find(msg => msg.type === 'user');
-        if (firstUserMessage) {
-            const newTitle = firstUserMessage.content.substring(0, 30) + (firstUserMessage.content.length > 30 ? '...' : '');
-            if (history.title !== newTitle) history.title = newTitle;
-        }
         this.saveChatHistories();
     }
 
@@ -507,16 +511,29 @@ class SmartQAApp {
                     </svg>
                     <span class="history-item-title">${this.escapeHtml(history.title)}</span>
                 </div>
-                <button class="history-item-delete" data-history-id="${history.id}" title="删除">
-                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                    </svg>
-                </button>
+                <div class="history-item-actions">
+                    <button class="history-item-rename" data-history-id="${history.id}" title="重命名">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                    <button class="history-item-delete" data-history-id="${history.id}" title="删除">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                    </button>
+                </div>
             `;
             historyItem.addEventListener('click', (e) => {
-                if (!e.target.closest('.history-item-delete')) {
+                if (!e.target.closest('.history-item-actions')) {
                     this.loadChatHistory(history.id);
                 }
+            });
+            const renameBtn = historyItem.querySelector('.history-item-rename');
+            renameBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.startRenameHistory(history.id, historyItem);
             });
             const deleteBtn = historyItem.querySelector('.history-item-delete');
             deleteBtn.addEventListener('click', (e) => {
@@ -525,6 +542,82 @@ class SmartQAApp {
             });
             this.chatHistoryList.appendChild(historyItem);
         });
+    }
+
+    startRenameHistory(historyId, historyItem) {
+        const titleSpan = historyItem.querySelector('.history-item-title');
+        if (!titleSpan) return;
+        const history = this.chatHistories.find(h => h.id === historyId);
+        if (!history) return;
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'history-item-rename-input';
+        input.value = history.title;
+        input.maxLength = 100;
+
+        titleSpan.replaceWith(input);
+        input.focus();
+        input.select();
+
+        let saved = false;
+        const save = async () => {
+            if (saved) return;
+            saved = true;
+            const newTitle = input.value.trim();
+            if (!newTitle || newTitle === history.title) {
+                this.renderChatHistory();
+                return;
+            }
+            await this.renameChatHistory(historyId, newTitle);
+        };
+        const cancel = () => {
+            if (saved) return;
+            saved = true;
+            this.renderChatHistory();
+        };
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                save();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                cancel();
+            }
+        });
+        input.addEventListener('blur', () => save());
+    }
+
+    async renameChatHistory(historyId, newTitle) {
+        try {
+            const response = await fetch(`/api/chat/session/${historyId}/rename`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: newTitle }),
+            });
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.detail || '重命名失败');
+            }
+            const result = await response.json();
+            if (result.status === 'success') {
+                const history = this.chatHistories.find(h => h.id === historyId);
+                if (history) {
+                    history.title = result.data?.title || newTitle;
+                    history.updatedAt = new Date().toISOString();
+                }
+                this.saveChatHistories();
+                this.renderChatHistory();
+                this.showNotification('标题已更新', 'success');
+            } else {
+                throw new Error(result.message || '重命名失败');
+            }
+        } catch (error) {
+            console.error('重命名会话失败:', error);
+            this.showNotification('重命名失败: ' + error.message, 'error');
+            this.renderChatHistory();
+        }
     }
 
     async loadChatHistory(historyId) {
@@ -1107,10 +1200,69 @@ class SmartQAApp {
             const response = await fetch(`${this.apiBaseUrl}/feedback/tags`);
             if (!response.ok) return;
             const data = await response.json();
+            
+
             this.feedbackTags = (data.data && data.data.tags) || [];
         } catch (e) {
             console.warn('加载反馈标签失败:', e);
         }
+    }
+
+    // ==================== 推荐问题 ====================
+
+    async loadSuggestions() {
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/chat/suggestions?limit=4`);
+            if (!response.ok) return;
+            const data = await response.json();
+            const suggestions = (data.data && data.data.suggestions) || [];
+
+            // 默认推荐问题（点赞数据不足时补充）
+            const defaults = [
+                { question: '寿险投保规则是什么？', label: '寿险投保规则', icon: '📋' },
+                { question: '体检标准有哪些？', label: '体检标准说明', icon: '🏥' },
+                { question: '残疾人员投保有什么限制？', label: '残疾人员投保', icon: '📋' },
+                { question: '人身险保额财务及契约调查规则', label: '保额调查规则', icon: '💰' },
+            ];
+
+            const usedQuestions = new Set();
+            const combined = [];
+
+            // 优先使用点赞热门问题
+            for (const s of suggestions) {
+                if (combined.length >= 4) break;
+                const q = s.question;
+                if (usedQuestions.has(q)) continue;
+                usedQuestions.add(q);
+                const label = q.length > 8 ? q.substring(0, 8) + '…' : q;
+                combined.push({ question: q, label, icon: '🔥' });
+            }
+
+            // 不足 4 条时用默认问题补齐
+            for (const d of defaults) {
+                if (combined.length >= 4) break;
+                if (usedQuestions.has(d.question)) continue;
+                usedQuestions.add(d.question);
+                combined.push(d);
+            }
+
+            if (combined.length > 0) {
+                this.renderSuggestions(combined);
+            }
+        } catch (e) {
+            console.warn('加载推荐问题失败:', e);
+        }
+    }
+
+    renderSuggestions(suggestions) {
+        const container = document.querySelector('.welcome-suggestions');
+        if (!container) return;
+        container.innerHTML = suggestions.map(s => `
+            <div class="suggestion-card" data-question="${this.escapeHtml(s.question)}">
+                <div class="suggestion-icon">${s.icon}</div>
+                <div class="suggestion-text">${this.escapeHtml(s.label)}</div>
+            </div>
+        `).join('');
     }
 
     openFeedbackModal(messageId, rating, chunkIds) {

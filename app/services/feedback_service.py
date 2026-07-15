@@ -288,6 +288,22 @@ class FeedbackStore:
 
         return [{"date": d, **counts} for d, counts in sorted(date_map.items())]
 
+    def get_popular_questions(self, limit: int = 4) -> list[dict[str, Any]]:
+        """获取被点赞最多的热门问题（按频次降序去重）。"""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT TRIM(question) AS question, COUNT(*) AS cnt, MAX(created_at) AS latest
+                FROM feedback
+                WHERE rating = 'like' AND TRIM(question) != ''
+                GROUP BY TRIM(question)
+                ORDER BY cnt DESC, latest DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [{"question": row["question"], "count": row["cnt"]} for row in rows]
+
     @staticmethod
     def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
         return {
@@ -376,6 +392,9 @@ class FeedbackService:
 
     def get_timeline(self, days: int = 30) -> list[dict[str, Any]]:
         return self.store.get_timeline(days=days)
+
+    def get_popular_questions(self, limit: int = 4) -> list[dict[str, Any]]:
+        return self.store.get_popular_questions(limit=limit)
 
     async def _push_to_external(self, feedback: dict[str, Any]) -> None:
         """如果配置了外部 API，推送反馈数据。"""

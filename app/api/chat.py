@@ -8,6 +8,8 @@
 - POST /chat/clear：清空会话历史
 - GET /chat/session/{session_id}：查询会话历史
 - GET /chat/sessions：列出所有会话
+- PUT /chat/session/{session_id}/rename：重命名会话标题
+- GET /chat/suggestions：获取推荐问题（基于用户点赞数据）
 """
 
 import json
@@ -17,17 +19,17 @@ from loguru import logger
 from sse_starlette.sse import EventSourceResponse
 
 from app.core.session_persistence import session_persistence_manager
-from app.models.request import ChatRequest, ClearRequest
+from app.models.request import ChatRequest, ClearRequest, RenameSessionRequest
 from app.models.response import (
     ApiResponse,
     ChatResultData,
     ChatSessionListResponse,
     SessionInfoResponse,
 )
+from app.services.feedback_service import feedback_service
 from app.services.rag_agent_service import rag_agent_service
 
 router = APIRouter()
-
 
 @router.post("/chat")
 async def chat(request: ChatRequest):
@@ -77,7 +79,6 @@ async def chat(request: ChatRequest):
                 error_message=str(e),
             ).model_dump(),
         }
-
 
 @router.post("/chat_stream")
 async def chat_stream(request: ChatRequest):
@@ -143,7 +144,6 @@ async def chat_stream(request: ChatRequest):
 
     return EventSourceResponse(event_generator())
 
-
 @router.post("/chat/clear", response_model=ApiResponse)
 async def clear_session(request: ClearRequest):
     """清空会话历史。"""
@@ -158,7 +158,6 @@ async def clear_session(request: ClearRequest):
     except Exception as e:
         logger.error(f"清空会话错误: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.get("/chat/sessions", response_model=ChatSessionListResponse)
 async def list_chat_sessions(
@@ -180,7 +179,6 @@ async def list_chat_sessions(
         logger.error(f"获取会话列表错误: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @router.get("/chat/session/{session_id}", response_model=SessionInfoResponse)
 async def get_session_info(session_id: str) -> SessionInfoResponse:
     """查询会话历史。"""
@@ -191,4 +189,37 @@ async def get_session_info(session_id: str) -> SessionInfoResponse:
         )
     except Exception as e:
         logger.error(f"获取会话信息错误: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/chat/session/{session_id}/rename", response_model=ApiResponse)
+async def rename_session(session_id: str, request: RenameSessionRequest) -> ApiResponse:
+    """重命名会话标题。"""
+    try:
+        title = request.title.strip()
+        if not title:
+            raise HTTPException(status_code=400, detail="标题不能为空")
+        success = session_persistence_manager.rename_chat_session(session_id, title)
+        if not success:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        logger.info(f"重命名会话: {session_id} -> {title}")
+        return ApiResponse(status="success", message="会话标题已更新", data={"title": title})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"重命名会话错误: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/chat/suggestions")
+async def get_suggestions(limit: int = 4) -> dict:
+    """获取推荐问题（基于用户点赞数据，不足时由前端补充默认问题）。"""
+    try:
+        safe_limit = max(1, min(limit, 10))
+        popular = feedback_service.get_popular_questions(limit=safe_limit)
+        return {
+            "code": 200,
+            "message": "success",
+            "data": {"suggestions": popular},
+        }
+    except Exception as e:
+        logger.error(f"获取推荐问题错误: {e}")
         raise HTTPException(status_code=500, detail=str(e))

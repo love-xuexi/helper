@@ -7,7 +7,6 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-
 class ChatRequest(BaseModel):
     """对话请求"""
 
@@ -23,7 +22,6 @@ class ChatRequest(BaseModel):
             }
         }
 
-
 class ClearRequest(BaseModel):
     """清空会话请求"""
 
@@ -32,6 +30,13 @@ class ClearRequest(BaseModel):
     class Config:
         populate_by_name = True
 
+class RenameSessionRequest(BaseModel):
+    """重命名会话请求"""
+
+    title: str = Field(..., description="新标题", alias="title", min_length=1, max_length=100)
+
+    class Config:
+        populate_by_name = True
 
 class FeedbackRequest(BaseModel):
     """反馈评价请求"""
@@ -63,7 +68,6 @@ class FeedbackRequest(BaseModel):
             }
         }
 
-
 class UploadUrlRequest(BaseModel):
     """通过 URL 上传文档请求"""
 
@@ -73,7 +77,6 @@ class UploadUrlRequest(BaseModel):
 
     class Config:
         populate_by_name = True
-
 
 class BugReportRequest(BaseModel):
     """Bug 上报请求（表单字段，实际接口使用 Form）"""
@@ -88,7 +91,6 @@ class BugReportRequest(BaseModel):
 
     class Config:
         populate_by_name = True
-
 
 class BugStatusUpdateRequest(BaseModel):
     """Bug 状态更新请求"""

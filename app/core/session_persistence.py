@@ -12,7 +12,6 @@ from loguru import logger
 
 from app.config import Settings, config
 
-
 @dataclass(frozen=True)
 class ChatSessionMetadata:
     session_id: str
@@ -46,7 +45,6 @@ class ChatSessionMetadata:
             question=question,
             answer=answer,
         )
-
 
 class InMemorySessionStore:
     """内存会话元数据存储（memory 后端使用）。
@@ -113,10 +111,22 @@ class InMemorySessionStore:
         with self._lock:
             self._sessions.pop(session_id, None)
 
+    def rename_session(self, session_id: str, title: str) -> bool:
+        """重命名会话标题。返回是否成功（会话是否存在）。"""
+        title = title.strip()
+        if not title:
+            return False
+        with self._lock:
+            existing = self._sessions.get(session_id)
+            if existing is None:
+                return False
+            existing["title"] = title
+            existing["updated_at"] = datetime.now(timezone.utc).isoformat()
+            return True
+
     def clear(self) -> None:
         with self._lock:
             self._sessions.clear()
-
 
 class SqliteSessionStore:
     """SQLite 会话存储（元数据 + 消息记录）。
@@ -279,6 +289,19 @@ class SqliteSessionStore:
             conn.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
             conn.commit()
 
+    def rename_session(self, session_id: str, title: str) -> bool:
+        """重命名会话标题。返回是否成功（会话是否存在）。"""
+        title = title.strip()
+        if not title:
+            return False
+        with self._lock, self._get_conn() as conn:
+            cursor = conn.execute(
+                "UPDATE chat_sessions SET title = ?, updated_at = ? WHERE session_id = ?",
+                (title, datetime.now().isoformat(), session_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
     @staticmethod
     def _session_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
         return {
@@ -290,7 +313,6 @@ class SqliteSessionStore:
             "message_count": row["message_count"],
             "user_id": row["user_id"],
         }
-
 
 class PostgresSessionStore:
     def __init__(self, connection: Any):
@@ -410,6 +432,19 @@ class PostgresSessionStore:
             cursor.execute("DELETE FROM chat_sessions WHERE session_id = %s", (session_id,))
         self.connection.commit()
 
+    def rename_session(self, session_id: str, title: str) -> bool:
+        """重命名会话标题。返回是否成功（会话是否存在）。"""
+        title = title.strip()
+        if not title:
+            return False
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE chat_sessions SET title = %s, updated_at = NOW() WHERE session_id = %s",
+                (title, session_id),
+            )
+            rowcount = cursor.rowcount
+        self.connection.commit()
+        return rowcount > 0
 
 class SessionPersistenceManager:
     def __init__(self, settings: Settings | None = None):
@@ -548,6 +583,16 @@ class SessionPersistenceManager:
         if self.in_memory_store is not None:
             self.in_memory_store.delete_session(session_id)
 
+    def rename_chat_session(self, session_id: str, title: str) -> bool:
+        """重命名会话标题，返回是否成功。"""
+        if self.sqlite_store is not None:
+            return self.sqlite_store.rename_session(session_id, title)
+        if self.session_store is not None:
+            return self.session_store.rename_session(session_id, title)
+        if self.in_memory_store is not None:
+            return self.in_memory_store.rename_session(session_id, title)
+        return False
+
     def close(self) -> None:
         if self._connection is not None:
             self._connection.close()
@@ -567,13 +612,11 @@ class SessionPersistenceManager:
                 self._checkpoint_context.__exit__(None, None, None)
             self._checkpoint_context = None
 
-
 def _format_datetime(value: Any) -> str:
     if isinstance(value, datetime):
         if value.tzinfo is None:
             value = value.replace(tzinfo=timezone.utc)
         return value.isoformat()
     return str(value)
-
 
 session_persistence_manager = SessionPersistenceManager()
