@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>智能问答助手</title>
-    <link rel="stylesheet" href="/static/styles.css?v=2">
+    <link rel="stylesheet" href="/static/styles.css?v=3">
     <!-- Markdown 渲染库 -->
     <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
     <!-- 代码高亮库 -->
@@ -151,6 +151,28 @@
                 </div>
             </div>
         </main>
+
+        <!-- 右侧引用来源侧边栏 -->
+        <aside class="references-sidebar" id="referencesSidebar">
+            <div class="references-header">
+                <div class="references-header-top">
+                    <div class="references-header-title">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M9 18V5L21 3V16M9 18C9 19.6569 7.65685 21 6 21C4.34315 21 3 19.6569 3 18C3 16.3431 4.34315 15 6 15C7.65685 15 9 16.3431 9 18ZM21 13C21 14.6569 19.6569 16 18 16C16.3431 16 15 14.6569 15 13C15 11.3431 16.3431 10 18 10C19.6569 10 21 11.3431 21 13Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        <span>引用来源</span>
+                    </div>
+                    <button class="references-close-btn" id="referencesCloseBtn" title="关闭">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="references-subtitle" id="referencesCount"></div>
+            </div>
+            <div class="references-list" id="referencesList">
+            </div>
+        </aside>
     </div>
 
     <!-- 反馈弹窗 -->
@@ -271,6 +293,6 @@
     <!-- 通知容器 -->
     <div id="notificationContainer" class="notification-container"></div>
 
-    <script src="/static/app.js?v=2"></script>
+    <script src="/static/app.js?v=3"></script>
 </body>
 </html>

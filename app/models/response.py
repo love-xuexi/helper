@@ -23,6 +23,7 @@ class Citation(BaseModel):
     document: str = Field(..., description="来源文档名称")
     similarity: float = Field(..., description="相似度")
     content_preview: str = Field("", description="内容预览")
+    content: str = Field("", description="片段完整内容")
 
 
 class ChatResultData(BaseModel):

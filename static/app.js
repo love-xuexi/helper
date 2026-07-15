@@ -134,6 +134,12 @@ class SmartQAApp {
         this.chatHistoryList = document.getElementById('chatHistoryList');
         this.notificationContainer = document.getElementById('notificationContainer');
 
+        // 引用来源侧边栏
+        this.referencesSidebar = document.getElementById('referencesSidebar');
+        this.referencesList = document.getElementById('referencesList');
+        this.referencesCount = document.getElementById('referencesCount');
+        this.referencesCloseBtn = document.getElementById('referencesCloseBtn');
+
         // 反馈弹窗
         this.feedbackModal = document.getElementById('feedbackModal');
         this.feedbackModalClose = document.getElementById('feedbackModalClose');
@@ -178,8 +184,128 @@ class SmartQAApp {
     // ==================== 事件绑定 ====================
 
     bindEvents() {
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         if (this.newChatBtn) {
             this.newChatBtn.addEventListener('click', () => this.newChat());
+        }
+
+        // 引用来源侧边栏关闭
+        if (this.referencesCloseBtn) {
+            this.referencesCloseBtn.addEventListener('click', () => this.closeReferencesSidebar());
         }
 
         
@@ -995,6 +1121,323 @@ class SmartQAApp {
         const existingCitations = messageContentWrapper.querySelector('.citations-container');
         if (existingCitations) existingCitations.remove();
 
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         const citationsContainer = document.createElement('div');
         citationsContainer.className = 'citations-container';
 
@@ -1016,6 +1459,7 @@ class SmartQAApp {
         citations.forEach(citation => {
             const citationItem = document.createElement('div');
             citationItem.className = 'citation-item';
+            citationItem.title = '点击查看完整文档块内容';
             citationItem.innerHTML = `
                 <div class="citation-index">${citation.index}</div>
                 <div class="citation-body">
@@ -1024,6 +1468,10 @@ class SmartQAApp {
                     <div class="citation-meta">相似度: ${(citation.similarity * 100).toFixed(1)}% · ID: ${this.escapeHtml(citation.id || '')}</div>
                 </div>
             `;
+            // 点击单个引用项，在右侧侧边栏展示该文档块的完整内容
+            citationItem.addEventListener('click', () => {
+                this.openReferencesSidebar(citation);
+            });
             citationsList.appendChild(citationItem);
         });
 
@@ -1039,6 +1487,40 @@ class SmartQAApp {
                 chevron.style.transform = isExpanded ? 'rotate(90deg)' : 'rotate(0deg)';
             }
         });
+    }
+
+    openReferencesSidebar(citation) {
+        if (!this.referencesSidebar || !this.referencesList) return;
+
+        this.referencesList.innerHTML = '';
+
+        const card = document.createElement('div');
+        card.className = 'reference-card';
+
+        const content = citation.content || citation.content_preview || '';
+
+        card.innerHTML = `
+            <div class="reference-card-header">
+                <div class="reference-index">${this.escapeHtml(String(citation.index || ''))}</div>
+                <div class="reference-document">${this.escapeHtml(citation.document || '未知文档')}</div>
+            </div>
+            <div class="reference-content">${this.escapeHtml(content)}</div>
+            <div class="reference-meta">相似度: ${((citation.similarity || 0) * 100).toFixed(1)}% · ID: ${this.escapeHtml(citation.id || '')}</div>
+        `;
+        this.referencesList.appendChild(card);
+
+        // 标题展示当前查看的文档名
+        if (this.referencesCount) {
+            this.referencesCount.textContent = `· ${citation.document || '未知文档'}`;
+        }
+
+        this.referencesSidebar.classList.add('open');
+    }
+
+    closeReferencesSidebar() {
+        if (this.referencesSidebar) {
+            this.referencesSidebar.classList.remove('open');
+        }
     }
 
     renderFeedbackButtons(messageElement, messageId, citations) {

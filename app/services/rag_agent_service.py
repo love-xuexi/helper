@@ -170,6 +170,7 @@ class RagAgentService:
                     "document": chunk.document_name,
                     "similarity": round(chunk.similarity, 4),
                     "content_preview": chunk.content_preview,
+                    "content": chunk.content,
                 }
             )
 

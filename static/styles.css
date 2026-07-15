@@ -750,11 +750,12 @@ body {
     border: 1px solid var(--border-light);
     border-radius: var(--radius-sm);
     transition: all 0.15s ease;
+    cursor: pointer;
 }
 
 .citation-item:hover {
     background: #fff;
-    border-color: var(--border);
+    border-color: var(--primary);
     box-shadow: var(--shadow-sm);
 }
 
@@ -796,6 +797,169 @@ body {
 }
 
 .citation-meta {
+    font-size: 11px;
+    color: var(--text-tertiary);
+}
+
+/* ============================================================
+   右侧引用来源侧边栏
+   ============================================================ */
+
+.references-sidebar {
+    width: 0;
+    min-width: 0;
+    overflow: hidden;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-main);
+    transition: width 0.25s ease, border-color 0.25s ease;
+    border-left: 1px solid transparent;
+}
+
+.references-sidebar.open {
+    width: 380px;
+    border-left: 1px solid var(--border);
+    box-shadow: var(--shadow-md);
+}
+
+.references-header {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-light);
+    background: var(--bg-main);
+}
+
+.references-header-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.references-header-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.references-header-title svg {
+    width: 18px;
+    height: 18px;
+    color: var(--primary);
+    flex-shrink: 0;
+}
+
+.references-subtitle {
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.4;
+    word-break: break-all;
+    min-height: 16px;
+}
+
+.references-close-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: all 0.15s ease;
+}
+
+.references-close-btn:hover {
+    background: var(--bg-sidebar);
+    color: var(--text-primary);
+}
+
+.references-close-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+.references-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.references-empty {
+    text-align: center;
+    color: var(--text-tertiary);
+    font-size: 13px;
+    padding: 40px 16px;
+}
+
+.reference-card {
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    background: var(--bg-sidebar);
+    padding: 12px 14px;
+    transition: all 0.15s ease;
+}
+
+.reference-card:hover {
+    background: #fff;
+    border-color: var(--border);
+    box-shadow: var(--shadow-sm);
+}
+
+.reference-card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.reference-index {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.reference-document {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.4;
+    word-break: break-all;
+}
+
+.reference-content {
+    margin-top: 10px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 280px;
+    overflow-y: auto;
+    padding: 2px 2px 2px 0;
+}
+
+.reference-meta {
+    margin-top: 8px;
     font-size: 11px;
     color: var(--text-tertiary);
 }
@@ -1443,6 +1607,25 @@ body {
 
     .chat-input-container {
         padding: 12px;
+    }
+
+    .references-sidebar {
+        position: fixed;
+        right: 0;
+        top: 0;
+        height: 100vh;
+        width: min(380px, 100%);
+        z-index: 100;
+        transform: translateX(100%);
+        transition: transform 0.25s ease;
+        box-shadow: none;
+        border-left: 1px solid var(--border);
+    }
+
+    .references-sidebar.open {
+        width: min(380px, 100%);
+        transform: translateX(0);
+        box-shadow: var(--shadow-lg);
     }
 }
 
