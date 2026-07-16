@@ -526,7 +526,7 @@ body {
 }
 
 .message.user .message-avatar {
-    background: #5436DA;
+    display: none;
 }
 
 .message-content-wrapper {
@@ -978,6 +978,11 @@ body {
 
 .message:hover .message-actions {
     opacity: 1;
+}
+
+/* 用户消息的操作按钮右对齐 */
+.message.user .message-actions {
+    justify-content: flex-end;
 }
 
 .action-btn {

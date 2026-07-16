@@ -934,6 +934,18 @@ class SmartQAApp {
         messageContentWrapper.appendChild(messageContent);
         messageDiv.appendChild(messageContentWrapper);
 
+        // 用户消息：在右侧添加头像
+        if (type === 'user') {
+            const messageAvatar = document.createElement('div');
+            messageAvatar.className = 'message-avatar';
+            messageAvatar.innerHTML = `
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 12C14.21 12 16 10.21 16 8C16 5.79 14.21 4 12 4C9.79 4 8 5.79 8 8C8 10.21 9.79 12 12 12ZM12 14C9.33 14 4 15.34 4 18V20H20V18C20 15.34 14.67 14 12 14Z"/>
+                </svg>
+            `;
+            messageDiv.appendChild(messageAvatar);
+        }
+
         if (this.chatMessages) {
             this.chatMessages.appendChild(messageDiv);
             this.checkAndSetCentered();
@@ -948,6 +960,26 @@ class SmartQAApp {
             if (options.messageId) {
                 this.renderFeedbackButtons(messageDiv, options.messageId, options.citations || []);
             }
+        }
+
+        // 用户消息：添加复制按钮
+        if (type === 'user') {
+            const userActionsDiv = document.createElement('div');
+            userActionsDiv.className = 'message-actions';
+            userActionsDiv.innerHTML = `
+                <button class="action-btn copy-btn" title="复制问题">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" stroke-width="2"/>
+                        <path d="M5 15H4C2.89543 15 2 14.1046 2 13V4C2 2.89543 2.89543 2 4 2H13C14.1046 2 15 2.89543 15 4V5" stroke="currentColor" stroke-width="2"/>
+                    </svg>
+                </button>
+            `;
+            userActionsDiv.querySelector('.copy-btn').addEventListener('click', () => {
+                navigator.clipboard.writeText(content).then(() => {
+                    this.showNotification('已复制到剪贴板', 'success');
+                });
+            });
+            messageContentWrapper.appendChild(userActionsDiv);
         }
 
         return messageDiv;
