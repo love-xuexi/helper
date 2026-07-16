@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +11,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from loguru import logger
 
 from app.config import Settings, config
+
 
 @dataclass(frozen=True)
 class ChatSessionMetadata:
@@ -33,7 +34,7 @@ class ChatSessionMetadata:
         question: str,
         answer: str,
         user_id: str = "",
-    ) -> "ChatSessionMetadata":
+    ) -> ChatSessionMetadata:
         title = question[:30] + ("..." if len(question) > 30 else "")
         preview = answer[:80] + ("..." if len(answer) > 80 else "")
         return cls(
@@ -46,6 +47,7 @@ class ChatSessionMetadata:
             answer=answer,
         )
 
+
 class InMemorySessionStore:
     """内存会话元数据存储（memory 后端使用）。
 
@@ -57,7 +59,7 @@ class InMemorySessionStore:
         self._lock = threading.Lock()
 
     def upsert_session(self, metadata: ChatSessionMetadata) -> None:
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(UTC).isoformat()
         with self._lock:
             existing = self._sessions.get(metadata.session_id)
             if existing is None:
@@ -121,12 +123,13 @@ class InMemorySessionStore:
             if existing is None:
                 return False
             existing["title"] = title
-            existing["updated_at"] = datetime.now(timezone.utc).isoformat()
+            existing["updated_at"] = datetime.now(UTC).isoformat()
             return True
 
     def clear(self) -> None:
         with self._lock:
             self._sessions.clear()
+
 
 class SqliteSessionStore:
     """SQLite 会话存储（元数据 + 消息记录）。
@@ -207,8 +210,13 @@ class SqliteSessionStore:
                     ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        metadata.session_id, title, now, now,
-                        metadata.last_message_preview, message_count, metadata.user_id,
+                        metadata.session_id,
+                        title,
+                        now,
+                        now,
+                        metadata.last_message_preview,
+                        message_count,
+                        metadata.user_id,
                     ),
                 )
             else:
@@ -225,8 +233,10 @@ class SqliteSessionStore:
                     WHERE session_id = ?
                     """,
                     (
-                        title, now,
-                        metadata.last_message_preview, message_count,
+                        title,
+                        now,
+                        metadata.last_message_preview,
+                        message_count,
                         metadata.user_id or "",
                         metadata.session_id,
                     ),
@@ -313,6 +323,7 @@ class SqliteSessionStore:
             "message_count": row["message_count"],
             "user_id": row["user_id"],
         }
+
 
 class PostgresSessionStore:
     def __init__(self, connection: Any):
@@ -446,6 +457,7 @@ class PostgresSessionStore:
         self.connection.commit()
         return rowcount > 0
 
+
 class SessionPersistenceManager:
     def __init__(self, settings: Settings | None = None):
         self.settings = settings or config
@@ -471,7 +483,9 @@ class SessionPersistenceManager:
             raise ValueError(f"Unsupported SESSION_CHECKPOINT_BACKEND: {self.backend}")
 
         if not self.settings.postgres_dsn:
-            raise ValueError("POSTGRES_DSN must be configured when SESSION_CHECKPOINT_BACKEND=postgres")
+            raise ValueError(
+                "POSTGRES_DSN must be configured when SESSION_CHECKPOINT_BACKEND=postgres"
+            )
 
         self._initialize_postgres()
 
@@ -489,7 +503,9 @@ class SessionPersistenceManager:
             raise ValueError(f"Unsupported SESSION_CHECKPOINT_BACKEND: {self.backend}")
 
         if not self.settings.postgres_dsn:
-            raise ValueError("POSTGRES_DSN must be configured when SESSION_CHECKPOINT_BACKEND=postgres")
+            raise ValueError(
+                "POSTGRES_DSN must be configured when SESSION_CHECKPOINT_BACKEND=postgres"
+            )
 
         await self._initialize_postgres_async()
 
@@ -612,11 +628,13 @@ class SessionPersistenceManager:
                 self._checkpoint_context.__exit__(None, None, None)
             self._checkpoint_context = None
 
+
 def _format_datetime(value: Any) -> str:
     if isinstance(value, datetime):
         if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
+            value = value.replace(tzinfo=UTC)
         return value.isoformat()
     return str(value)
+
 
 session_persistence_manager = SessionPersistenceManager()

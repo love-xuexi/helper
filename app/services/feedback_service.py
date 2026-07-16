@@ -26,7 +26,6 @@ from loguru import logger
 
 from app.config import config
 
-
 # 预设的负反馈选项
 NEGATIVE_FEEDBACK_TAGS = [
     "回答不准确",
@@ -72,21 +71,13 @@ class FeedbackStore:
             )
             # 兼容已存在的旧表：补 user_id 列
             self._ensure_column(conn, "feedback", "user_id", "TEXT NOT NULL DEFAULT ''")
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_feedback_session ON feedback(session_id)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_feedback_message ON feedback(message_id)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_feedback_rating ON feedback(rating)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_feedback_session ON feedback(session_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_feedback_message ON feedback(message_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_feedback_rating ON feedback(rating)")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback(created_at DESC)"
             )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedback(user_id)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedback(user_id)")
         self._initialized = True
         logger.info(f"[FeedbackStore] 数据库初始化完成: {self.db_path}")
 
@@ -128,7 +119,9 @@ class FeedbackStore:
                 "DELETE FROM feedback WHERE message_id = ?", (message_id,)
             ).rowcount
             if deleted > 0:
-                logger.info(f"[FeedbackStore] 覆盖旧反馈: message_id={message_id}, deleted={deleted}")
+                logger.info(
+                    f"[FeedbackStore] 覆盖旧反馈: message_id={message_id}, deleted={deleted}"
+                )
 
             cursor = conn.execute(
                 """
@@ -139,23 +132,31 @@ class FeedbackStore:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    session_id, message_id, question, answer, rating,
-                    tags_json, feedback_description, chunks_json,
-                    now, now, user_id,
+                    session_id,
+                    message_id,
+                    question,
+                    answer,
+                    rating,
+                    tags_json,
+                    feedback_description,
+                    chunks_json,
+                    now,
+                    now,
+                    user_id,
                 ),
             )
             feedback_id = cursor.lastrowid
             conn.commit()
 
-        logger.info(f"[FeedbackStore] 反馈已存储: id={feedback_id}, rating={rating}, message_id={message_id}")
+        logger.info(
+            f"[FeedbackStore] 反馈已存储: id={feedback_id}, rating={rating}, message_id={message_id}"
+        )
         return self.get_feedback(feedback_id)
 
     def get_feedback(self, feedback_id: int) -> dict[str, Any] | None:
         """获取单条反馈。"""
         with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT * FROM feedback WHERE id = ?", (feedback_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM feedback WHERE id = ?", (feedback_id,)).fetchone()
         return self._row_to_dict(row) if row else None
 
     def list_feedback(
@@ -221,7 +222,9 @@ class FeedbackStore:
         with self._get_conn() as conn:
             total = conn.execute("SELECT COUNT(*) FROM feedback").fetchone()[0]
             likes = conn.execute("SELECT COUNT(*) FROM feedback WHERE rating='like'").fetchone()[0]
-            dislikes = conn.execute("SELECT COUNT(*) FROM feedback WHERE rating='dislike'").fetchone()[0]
+            dislikes = conn.execute(
+                "SELECT COUNT(*) FROM feedback WHERE rating='dislike'"
+            ).fetchone()[0]
 
             # 统计负反馈标签分布
             tag_counts: dict[str, int] = {}

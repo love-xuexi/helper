@@ -18,10 +18,10 @@
 
 from __future__ import annotations
 
-import json
+from collections.abc import AsyncGenerator
 from datetime import datetime
 from textwrap import dedent
-from typing import Any, AsyncGenerator
+from typing import Any
 
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -30,14 +30,41 @@ from loguru import logger
 from app.config import config
 from app.core.llm_factory import llm_factory
 from app.core.session_persistence import session_persistence_manager
-from app.services.kb_api_client import RetrievedChunk, RetrievalResult, kb_api_client
+from app.services.kb_api_client import RetrievalResult, kb_api_client
 
 # 需要知识库检索的关键词（命中则走 RAG，否则直接回答）
 _KB_KEYWORDS = [
-    "投保", "寿险", "保险", "规则", "体检", "核保", "理赔", "保额", "风险",
-    "产品", "条款", "政策", "规定", "标准", "流程", "要求", "条件",
-    "知识库", "文档", "资料", "检索", "根据", "引用", "来源",
-    "阳光", "升", "重疾", "身故", "残疾", "职业", "年龄",
+    "投保",
+    "寿险",
+    "保险",
+    "规则",
+    "体检",
+    "核保",
+    "理赔",
+    "保额",
+    "风险",
+    "产品",
+    "条款",
+    "政策",
+    "规定",
+    "标准",
+    "流程",
+    "要求",
+    "条件",
+    "知识库",
+    "文档",
+    "资料",
+    "检索",
+    "根据",
+    "引用",
+    "来源",
+    "阳光",
+    "升",
+    "重疾",
+    "身故",
+    "残疾",
+    "职业",
+    "年龄",
 ]
 
 
@@ -182,12 +209,7 @@ class RagAgentService:
         """构建包含检索上下文的用户消息。"""
         if not context:
             return question
-        return (
-            f"请基于以下参考资料回答用户的问题。\n\n"
-            f"{context}\n\n"
-            f"---\n"
-            f"用户的问题：{question}"
-        )
+        return f"请基于以下参考资料回答用户的问题。\n\n{context}\n\n---\n用户的问题：{question}"
 
     # ----------------------------------------------------------------
     # 非流式查询
@@ -223,7 +245,9 @@ class RagAgentService:
             answer = ""
             if messages_result:
                 last_message = messages_result[-1]
-                answer = last_message.content if hasattr(last_message, "content") else str(last_message)
+                answer = (
+                    last_message.content if hasattr(last_message, "content") else str(last_message)
+                )
 
             message_id = f"msg_{session_id}_{int(datetime.now().timestamp() * 1000)}"
 
@@ -241,7 +265,9 @@ class RagAgentService:
     # ----------------------------------------------------------------
     # 流式查询
     # ----------------------------------------------------------------
-    async def query_stream(self, question: str, session_id: str) -> AsyncGenerator[dict[str, Any], None]:
+    async def query_stream(
+        self, question: str, session_id: str
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """流式查询，yield 多种事件。
 
         事件类型：
@@ -279,7 +305,11 @@ class RagAgentService:
             async for token, metadata in self.agent.astream(
                 input=agent_input, config=config_dict, stream_mode="messages"
             ):
-                node_name = metadata.get("langgraph_node", "unknown") if isinstance(metadata, dict) else "unknown"
+                node_name = (
+                    metadata.get("langgraph_node", "unknown")
+                    if isinstance(metadata, dict)
+                    else "unknown"
+                )
                 message_type = type(token).__name__
 
                 if message_type in ("AIMessage", "AIMessageChunk"):
@@ -290,7 +320,11 @@ class RagAgentService:
                                 text_content = block.get("text", "")
                                 if text_content:
                                     full_response += text_content
-                                    yield {"type": "content", "data": text_content, "node": node_name}
+                                    yield {
+                                        "type": "content",
+                                        "data": text_content,
+                                        "node": node_name,
+                                    }
                     elif isinstance(getattr(token, "content", None), str) and token.content:
                         full_response += token.content
                         yield {"type": "content", "data": token.content, "node": node_name}

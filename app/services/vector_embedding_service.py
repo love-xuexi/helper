@@ -1,10 +1,11 @@
 """向量嵌入服务模块 - 基于 LangChain Embeddings 标准接口"""
 
-from typing import Any, Callable, List
+from collections.abc import Callable
+from typing import Any
 
 from langchain_core.embeddings import Embeddings
-from openai import OpenAI
 from loguru import logger
+from openai import OpenAI
 
 from app.config import config
 from app.services.embedding_input_guard import (
@@ -15,7 +16,7 @@ from app.services.embedding_input_guard import (
 
 class OpenAICompatibleEmbeddings(Embeddings):
     """阿里云 DashScope Text Embedding (OpenAI 兼容模式)
-    
+
     实现 LangChain 标准 Embeddings 接口:
     - embed_documents(texts: List[str]) → List[List[float]]: 批量嵌入文档
     - embed_query(text: str) → List[float]: 嵌入单个查询
@@ -50,7 +51,7 @@ class OpenAICompatibleEmbeddings(Embeddings):
         初始化本身不会生成向量，只是创建一个 OpenAI SDK Client。
         这里虽然使用 OpenAI 这个 Python 包，但 base_url 指向的是阿里云 DashScope
         的 OpenAI 兼容接口，所以实际请求发给 DashScope。
-        
+
         Args:
             api_key: DashScope API Key
             model: 嵌入模型名称
@@ -60,7 +61,7 @@ class OpenAICompatibleEmbeddings(Embeddings):
             raise ValueError("请设置 Embedding API Key")
         if not base_url:
             raise ValueError("请设置 Embedding Base URL")
-        
+
         # 创建 OpenAI 兼容客户端
         # 后续 self.client.embeddings.create(...) 会请求 DashScope embedding 接口
         self.client = client_factory(
@@ -72,7 +73,7 @@ class OpenAICompatibleEmbeddings(Embeddings):
         self.encoding_format = encoding_format
         self.max_tokens = max_tokens
         self.token_safety_margin = token_safety_margin
-        
+
         # 打印初始化信息
         masked_key = self._mask_api_key(api_key)
         logger.info(
@@ -87,7 +88,7 @@ class OpenAICompatibleEmbeddings(Embeddings):
             return f"{api_key[:8]}...{api_key[-4:]}"
         return "***"
 
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """
         批量嵌入文档列表 (LangChain 标准接口)
 
@@ -109,16 +110,16 @@ class OpenAICompatibleEmbeddings(Embeddings):
 
         返回值外层列表长度等于输入文本数量；
         内层每个列表就是一段文本的 embedding 向量，长度是 self.dimensions。
-        
+
         Args:
             texts: 文本列表
-            
+
         Returns:
             List[List[float]]: 嵌入向量列表
         """
         if not texts:
             return []
-        
+
         try:
             logger.info(f"批量嵌入 {len(texts)} 个文档")
             safe_texts = [self._prepare_document_text(text) for text in texts]
@@ -132,22 +133,20 @@ class OpenAICompatibleEmbeddings(Embeddings):
                 if self.dimensions:
                     request_kwargs["dimensions"] = self.dimensions
 
-                response = self.client.embeddings.create(
-                    **request_kwargs
-                )
+                response = self.client.embeddings.create(**request_kwargs)
                 embeddings.append(response.data[0].embedding)
 
             logger.debug(f"批量嵌入完成, 维度: {len(embeddings[0])}")
-            
+
             return embeddings
-            
+
         except ValueError:
             raise
         except Exception as e:
             logger.error(f"批量嵌入失败: {e}")
             raise RuntimeError(f"批量嵌入失败: {e}") from e
 
-    def embed_query(self, text: str) -> List[float]:
+    def embed_query(self, text: str) -> list[float]:
         """
         嵌入单个查询文本 (LangChain 标准接口)
 
@@ -160,20 +159,20 @@ class OpenAICompatibleEmbeddings(Embeddings):
 
         然后 Milvus 用这个 query 向量去和库里的文档向量做相似度搜索，
         找出语义最接近的几个文档分片。
-        
+
         Args:
             text: 查询文本
-            
+
         Returns:
             List[float]: 嵌入向量
         """
         if not text or not text.strip():
             raise ValueError("查询文本不能为空")
-        
+
         try:
             logger.debug(f"嵌入查询, 长度: {len(text)} 字符")
             safe_text = self._prepare_query_text(text)
-            
+
             # 单条查询也走同一个 embedding 接口
             # 区别是 input 传入的是一个字符串，而不是字符串列表
             request_kwargs = {
@@ -184,16 +183,14 @@ class OpenAICompatibleEmbeddings(Embeddings):
             if self.dimensions:
                 request_kwargs["dimensions"] = self.dimensions
 
-            response = self.client.embeddings.create(
-                **request_kwargs
-            )
-            
+            response = self.client.embeddings.create(**request_kwargs)
+
             # 单条查询只会返回一个 embedding，所以取 response.data[0]
             embedding = response.data[0].embedding
             logger.debug(f"查询嵌入完成, 维度: {len(embedding)}")
-            
+
             return embedding
-            
+
         except Exception as e:
             logger.error(f"查询嵌入失败: {e}")
             raise RuntimeError(f"查询嵌入失败: {e}") from e

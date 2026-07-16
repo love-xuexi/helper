@@ -1,6 +1,7 @@
 import re
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Union
 
 import httpx
 from langchain_core.documents import Document
@@ -8,8 +9,8 @@ from loguru import logger
 
 from app.config import config
 
-RerankResponse = Union[Dict[str, Any], List[Dict[str, Any]]]
-PostJson = Callable[[str, Dict[str, str], Dict[str, Any], float], RerankResponse]
+RerankResponse = Union[dict[str, Any], list[dict[str, Any]]]
+PostJson = Callable[[str, dict[str, str], dict[str, Any], float], RerankResponse]
 
 
 class RerankProvider(str, Enum):
@@ -18,7 +19,7 @@ class RerankProvider(str, Enum):
 
 
 class LocalKeywordReranker:
-    def rerank(self, query: str, documents: List[Document], top_k: int) -> List[Document]:
+    def rerank(self, query: str, documents: list[Document], top_k: int) -> list[Document]:
         if not documents or top_k <= 0:
             return []
 
@@ -27,7 +28,9 @@ class LocalKeywordReranker:
         for index, document in enumerate(documents):
             content_terms = self._tokenize(document.page_content)
             overlap = len(query_terms & content_terms)
-            substring_bonus = sum(1 for term in query_terms if term and term in document.page_content)
+            substring_bonus = sum(
+                1 for term in query_terms if term and term in document.page_content
+            )
             score = overlap * 2 + substring_bonus
             scored_docs.append((score, -index, document))
 
@@ -46,13 +49,13 @@ class LocalKeywordReranker:
 class RerankService:
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        model: Optional[str] = None,
-        provider: Optional[RerankProvider | str] = None,
-        timeout_seconds: Optional[float] = None,
-        post_json: Optional[PostJson] = None,
-        fallback_reranker: Optional[LocalKeywordReranker] = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
+        provider: RerankProvider | str | None = None,
+        timeout_seconds: float | None = None,
+        post_json: PostJson | None = None,
+        fallback_reranker: LocalKeywordReranker | None = None,
     ):
         self.api_key = api_key if api_key is not None else config.effective_rerank_api_key
         self.base_url = base_url if base_url is not None else config.effective_rerank_base_url
@@ -63,7 +66,7 @@ class RerankService:
         self.post_json = post_json or self._post_json
         self.fallback_reranker = fallback_reranker or LocalKeywordReranker()
 
-    def rerank(self, query: str, documents: List[Document], top_k: int) -> List[Document]:
+    def rerank(self, query: str, documents: list[Document], top_k: int) -> list[Document]:
         if not documents or top_k <= 0:
             return []
 
@@ -78,7 +81,9 @@ class RerankService:
                 "Content-Type": "application/json",
                 "Accept": "application/json",
             }
-            response_json = self.post_json(self._ranking_url(), headers, payload, self.timeout_seconds)
+            response_json = self.post_json(
+                self._ranking_url(), headers, payload, self.timeout_seconds
+            )
             ranked_items = self._extract_ranked_items(response_json)
             reranked = self._map_ranked_items_to_documents(ranked_items, documents)
 
@@ -99,7 +104,11 @@ class RerankService:
 
     def _openai_compatible_ranking_url(self) -> str:
         base_url = self.base_url.rstrip("/")
-        if base_url.endswith("/ranking") or base_url.endswith("/reranking") or base_url.endswith("/rerank"):
+        if (
+            base_url.endswith("/ranking")
+            or base_url.endswith("/reranking")
+            or base_url.endswith("/rerank")
+        ):
             return base_url
         if not base_url.endswith("/v1"):
             base_url = f"{base_url}/v1"
@@ -125,7 +134,7 @@ class RerankService:
     def _model_path_name(self) -> str:
         return self.model.replace(".", "_")
 
-    def _build_payload(self, query: str, documents: List[Document], top_k: int) -> Dict[str, Any]:
+    def _build_payload(self, query: str, documents: list[Document], top_k: int) -> dict[str, Any]:
         if self.provider == RerankProvider.OPENAI_COMPATIBLE:
             return {
                 "model": self.model,
@@ -144,8 +153,8 @@ class RerankService:
     @staticmethod
     def _post_json(
         url: str,
-        headers: Dict[str, str],
-        payload: Dict[str, Any],
+        headers: dict[str, str],
+        payload: dict[str, Any],
         timeout: float,
     ) -> RerankResponse:
         with httpx.Client(timeout=timeout) as client:
@@ -154,7 +163,7 @@ class RerankService:
             return response.json()
 
     @staticmethod
-    def _extract_ranked_items(response_json: RerankResponse) -> List[Dict[str, Any]]:
+    def _extract_ranked_items(response_json: RerankResponse) -> list[dict[str, Any]]:
         if isinstance(response_json, list):
             return [item for item in response_json if isinstance(item, dict)]
 
@@ -167,10 +176,10 @@ class RerankService:
 
     @staticmethod
     def _map_ranked_items_to_documents(
-        ranked_items: List[Dict[str, Any]],
-        documents: List[Document],
-    ) -> List[Document]:
-        mapped_items: List[Tuple[float, int, Document]] = []
+        ranked_items: list[dict[str, Any]],
+        documents: list[Document],
+    ) -> list[Document]:
+        mapped_items: list[tuple[float, int, Document]] = []
         used_indexes = set()
 
         for order, item in enumerate(ranked_items):
@@ -185,7 +194,7 @@ class RerankService:
         return [document for _, _, document in mapped_items]
 
     @staticmethod
-    def _extract_index(item: Dict[str, Any]) -> Optional[int]:
+    def _extract_index(item: dict[str, Any]) -> int | None:
         for key in ("index", "passage_index", "document_index"):
             value = item.get(key)
             if isinstance(value, int):
@@ -193,7 +202,7 @@ class RerankService:
         return None
 
     @staticmethod
-    def _extract_score(item: Dict[str, Any]) -> float:
+    def _extract_score(item: dict[str, Any]) -> float:
         for key in ("logit", "score", "relevance_score"):
             value = item.get(key)
             if isinstance(value, (int, float)):

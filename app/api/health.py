@@ -22,7 +22,6 @@ async def health_check():
     - 知识库 API 连通性
     - 反馈数据库可用性
     """
-    import asyncio
 
     health_data: dict[str, Any] = {
         "service": config.app_name,

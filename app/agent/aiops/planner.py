@@ -18,14 +18,16 @@ planner 的职责不是直接执行工具，也不是直接生成最终报告，
 """
 
 from textwrap import dedent
-from typing import Dict, Any, List
-from langchain_core.prompts import ChatPromptTemplate
-from pydantic import BaseModel, Field
-from loguru import logger
+from typing import Any
 
+from langchain_core.prompts import ChatPromptTemplate
+from loguru import logger
+from pydantic import BaseModel, Field
+
+from app.agent.mcp_client import get_mcp_client_with_retry
 from app.core.llm_factory import llm_factory
 from app.tools import get_current_time, retrieve_knowledge
-from app.agent.mcp_client import get_mcp_client_with_retry
+
 from .state import PlanExecuteState
 from .utils import format_tools_description
 
@@ -45,7 +47,8 @@ class Plan(BaseModel):
 
     后面 llm.with_structured_output(Plan) 会强制模型尽量按照这个 schema 返回。
     """
-    steps: List[str] = Field(
+
+    steps: list[str] = Field(
         description="完成任务所需的不同步骤。这些步骤应该按顺序执行，每一步都建立在前一步的基础上。"
     )
 
@@ -91,7 +94,7 @@ planner_prompt = ChatPromptTemplate.from_messages(
 )
 
 
-async def planner(state: PlanExecuteState) -> Dict[str, Any]:
+async def planner(state: PlanExecuteState) -> dict[str, Any]:
     """
     规划节点：根据用户输入生成执行计划
 
@@ -149,10 +152,7 @@ async def planner(state: PlanExecuteState) -> Dict[str, Any]:
         # 本地工具是项目里直接定义的 LangChain Tool。
         # get_current_time：获取当前时间
         # retrieve_knowledge：查询本项目知识库
-        local_tools = [
-            get_current_time,
-            retrieve_knowledge
-        ]
+        local_tools = [get_current_time, retrieve_knowledge]
 
         # 获取 MCP 工具
         # MCP 工具来自外部 MCP Server。
@@ -204,11 +204,13 @@ async def planner(state: PlanExecuteState) -> Dict[str, Any]:
         # 1. messages：用户原始任务
         # 2. tools_description：当前可用工具清单
         # 3. experience_context：知识库检索到的历史经验
-        plan_result = await planner_chain.ainvoke({
-            "messages": [("user", input_text)],
-            "tools_description": tools_description,
-            "experience_context": experience_context
-        })
+        plan_result = await planner_chain.ainvoke(
+            {
+                "messages": [("user", input_text)],
+                "tools_description": tools_description,
+                "experience_context": experience_context,
+            }
+        )
 
         # 提取步骤列表
         # 正常情况下 plan_result 是 Plan 对象；
@@ -232,10 +234,4 @@ async def planner(state: PlanExecuteState) -> Dict[str, Any]:
         # 返回一个默认计划
         # 如果知识库、MCP 工具或 LLM 调用失败，仍然返回一个最基础的兜底计划，
         # 避免整个 Plan-Execute-Replan 流程在 planner 阶段直接中断。
-        return {
-            "plan": [
-                "收集相关信息",
-                "分析数据",
-                "生成报告"
-            ]
-        }
+        return {"plan": ["收集相关信息", "分析数据", "生成报告"]}

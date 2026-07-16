@@ -31,6 +31,7 @@ from app.services.rag_agent_service import rag_agent_service
 
 router = APIRouter()
 
+
 @router.post("/chat")
 async def chat(request: ChatRequest):
     """快速对话接口（非流式）
@@ -80,6 +81,7 @@ async def chat(request: ChatRequest):
             ).model_dump(),
         }
 
+
 @router.post("/chat_stream")
 async def chat_stream(request: ChatRequest):
     """流式对话接口（SSE）
@@ -95,14 +97,18 @@ async def chat_stream(request: ChatRequest):
 
     async def event_generator():
         try:
-            async for chunk in rag_agent_service.query_stream(request.question, session_id=request.id):
+            async for chunk in rag_agent_service.query_stream(
+                request.question, session_id=request.id
+            ):
                 chunk_type = chunk.get("type", "unknown")
                 chunk_data = chunk.get("data", None)
 
                 if chunk_type == "retrieving":
                     yield {
                         "event": "message",
-                        "data": json.dumps({"type": "retrieving", "data": None}, ensure_ascii=False),
+                        "data": json.dumps(
+                            {"type": "retrieving", "data": None}, ensure_ascii=False
+                        ),
                     }
                 elif chunk_type == "search_results":
                     yield {
@@ -144,6 +150,7 @@ async def chat_stream(request: ChatRequest):
 
     return EventSourceResponse(event_generator())
 
+
 @router.post("/chat/clear", response_model=ApiResponse)
 async def clear_session(request: ClearRequest):
     """清空会话历史。"""
@@ -158,6 +165,7 @@ async def clear_session(request: ClearRequest):
     except Exception as e:
         logger.error(f"清空会话错误: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/chat/sessions", response_model=ChatSessionListResponse)
 async def list_chat_sessions(
@@ -179,6 +187,7 @@ async def list_chat_sessions(
         logger.error(f"获取会话列表错误: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.get("/chat/session/{session_id}", response_model=SessionInfoResponse)
 async def get_session_info(session_id: str) -> SessionInfoResponse:
     """查询会话历史。"""
@@ -190,6 +199,7 @@ async def get_session_info(session_id: str) -> SessionInfoResponse:
     except Exception as e:
         logger.error(f"获取会话信息错误: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.put("/chat/session/{session_id}/rename", response_model=ApiResponse)
 async def rename_session(session_id: str, request: RenameSessionRequest) -> ApiResponse:
@@ -208,6 +218,7 @@ async def rename_session(session_id: str, request: RenameSessionRequest) -> ApiR
     except Exception as e:
         logger.error(f"重命名会话错误: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/chat/suggestions")
 async def get_suggestions(limit: int = 4) -> dict:

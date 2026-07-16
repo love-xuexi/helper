@@ -12,9 +12,15 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
-from app.api import bug, chat, feedback, file, health
-from app.api import admin  # 管理后台聚合接口（Bug + 反馈时间线等）
-from app.api import aiops  # AIOps 模块（预留，需 MCP 服务支持）
+from app.api import (
+    admin,  # 管理后台聚合接口（Bug + 反馈时间线等）
+    aiops,  # AIOps 模块（预留，需 MCP 服务支持）
+    bug,
+    chat,
+    feedback,
+    file,
+    health,
+)
 from app.config import config
 from app.core.session_persistence import session_persistence_manager
 from app.services.bug_service import bug_service

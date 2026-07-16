@@ -14,21 +14,23 @@ planner 节点负责生成 plan 列表，executor 节点每次只取 plan 里的
 LangGraph 会把这个返回值合并回全局状态，之后 replanner 会根据 past_steps 判断是否继续执行。
 """
 
-from typing import Dict, Any
+from typing import Any
+
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.prebuilt import ToolNode
 from loguru import logger
 
+from app.agent.mcp_client import get_mcp_client_with_retry
 from app.core.llm_factory import llm_factory
 from app.tools import get_current_time, retrieve_knowledge
-from app.agent.mcp_client import get_mcp_client_with_retry
+
 from .state import PlanExecuteState
 
 
-async def executor(state: PlanExecuteState) -> Dict[str, Any]:
+async def executor(state: PlanExecuteState) -> dict[str, Any]:
     """
     执行节点：执行计划中的下一个步骤
-    
+
     使用 LangGraph 的 ToolNode 自动处理工具调用
 
     输入 state 示例：
@@ -78,10 +80,7 @@ async def executor(state: PlanExecuteState) -> Dict[str, Any]:
         # 这些工具可以被 LLM 调用：
         # get_current_time：获取当前时间
         # retrieve_knowledge：检索知识库经验/文档
-        local_tools = [
-            get_current_time,
-            retrieve_knowledge
-        ]
+        local_tools = [get_current_time, retrieve_knowledge]
 
         # 获取 MCP 工具
         # MCP 工具来自外部 MCP Server，例如告警查询、日志查询、指标查询等。
@@ -114,7 +113,8 @@ async def executor(state: PlanExecuteState) -> Dict[str, Any]:
         # 这里有意只让模型关注当前 task，而不是整个原始任务。
         # 这样 executor 每次只完成一个明确步骤，便于后续 replanner 评估。
         messages = [
-            SystemMessage(content="""你是一个能力强大的助手，负责执行具体的任务步骤。
+            SystemMessage(
+                content="""你是一个能力强大的助手，负责执行具体的任务步骤。
 
 你可以使用各种工具来完成任务。对于每个步骤：
 1. 理解步骤的目标
@@ -126,8 +126,9 @@ async def executor(state: PlanExecuteState) -> Dict[str, Any]:
 - 如果工具调用失败，请说明失败原因
 - 不要编造数据，只返回实际获取的信息
 - 执行结果要清晰、准确
-- 专注于当前步骤，不要考虑其他任务"""),
-            HumanMessage(content=f"请执行以下任务: {task}")
+- 专注于当前步骤，不要考虑其他任务"""
+            ),
+            HumanMessage(content=f"请执行以下任务: {task}"),
         ]
 
         # 第一步：LLM 决定是否调用工具
@@ -140,7 +141,7 @@ async def executor(state: PlanExecuteState) -> Dict[str, Any]:
         # 第二步：如果有工具调用，执行工具
         if hasattr(llm_response, "tool_calls") and llm_response.tool_calls:
             logger.info(f"检测到 {len(llm_response.tool_calls)} 个工具调用")
-            
+
             # 使用 ToolNode 自动执行工具
             # 先把 AIMessage 追加到 messages 中，因为 ToolNode 需要从最后的 AIMessage 里读取 tool_calls。
             messages.append(llm_response)
@@ -151,18 +152,22 @@ async def executor(state: PlanExecuteState) -> Dict[str, Any]:
             #     ]
             # }
             tool_messages = await tool_node.ainvoke({"messages": messages})
-            
+
             # 第三步：将工具结果返回给 LLM 生成最终答案
             # 工具执行结果本身通常比较原始。
             # 这里再让 LLM 基于工具结果整理成当前步骤的自然语言执行结果。
             messages.extend(tool_messages["messages"])
             final_response = await llm_with_tools.ainvoke(messages)
-            result = final_response.content if hasattr(final_response, 'content') else str(final_response)
+            result = (
+                final_response.content
+                if hasattr(final_response, "content")
+                else str(final_response)
+            )
         else:
             # 没有工具调用，直接使用 LLM 的输出
             # 例如某些步骤只是“总结已有信息”，不一定需要工具。
             logger.info("LLM 未调用工具，直接返回结果")
-            result = llm_response.content if hasattr(llm_response, 'content') else str(llm_response)
+            result = llm_response.content if hasattr(llm_response, "content") else str(llm_response)
 
         logger.info(f"步骤执行完成，结果长度: {len(result)}")
 

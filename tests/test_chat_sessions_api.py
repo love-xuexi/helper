@@ -56,9 +56,7 @@ def test_list_chat_sessions_passes_offset_and_user_id(monkeypatch):
         return []
 
     monkeypatch.setattr(session_persistence_manager, "list_chat_sessions", fake_list)
-    monkeypatch.setattr(
-        session_persistence_manager, "count_chat_sessions", lambda user_id=None: 0
-    )
+    monkeypatch.setattr(session_persistence_manager, "count_chat_sessions", lambda user_id=None: 0)
 
     response = client.get("/api/chat/sessions?limit=5&offset=10&user_id=u1")
 

@@ -41,7 +41,7 @@ class RetrievedChunk:
     raw: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_api(cls, data: dict[str, Any]) -> "RetrievedChunk":
+    def from_api(cls, data: dict[str, Any]) -> RetrievedChunk:
         """从 API 返回的原始字典构建实例。"""
         return cls(
             content=data.get("content", ""),
@@ -73,7 +73,7 @@ class RetrievalResult:
     raw: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_api(cls, data: dict[str, Any]) -> "RetrievalResult":
+    def from_api(cls, data: dict[str, Any]) -> RetrievalResult:
         """从 API 返回的 data 字段构建。"""
         chunks_data = data.get("chunks", [])
         chunks = [RetrievedChunk.from_api(c) for c in chunks_data]

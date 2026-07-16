@@ -1,67 +1,119 @@
-# 知行智能Agent (super-biz-agent-py) 整体框架分析
+## Overview
+The reference project at `C:\Users\86176\Desktop\阳光实习\helper` is a FastAPI + vanilla-JS RAG Q&A assistant ("智能问答助手"). It has a chat UI, knowledge-base management, feedback/bug systems, and an admin backend. The "近期对话" (recent conversations) feature is a full multi-session chat-history system with **dual storage** (browser localStorage + server SQLite) and an admin viewer.
 
-## 1. 项目整体定位
-`super-biz-agent-py` 是一个企业级的智能对话和运维助手系统。它融合了 **RAG (检索增强生成)** 知识库问答和 **AIOps (智能运维)** 自动化故障诊断。该系统不局限于简单的 LLM 对话，而是通过 LangGraph 构建了具备规划、执行、反思能力的 Agent 生态，并利用 MCP (Model Context Protocol) 协议接入了外部监控和日志等基础设施。
+## Full Directory Structure (key parts)
+```
+helper/
+├── app/                          # Backend (FastAPI)
+│   ├── main.py                   # App entry, route registration, lifespan (inits session_persistence)
+│   ├── run_server.py, config.py, __init__.py
+│   ├── api/                      # Route files
+│   │   ├── chat.py               # ★ Chat + session-history endpoints
+│   │   ├── admin.py              # Admin timeline (Bug+Feedback merge)
+│   │   ├── feedback.py, bug.py, file.py, aiops.py, health.py
+│   ├── core/
+│   │   ├── session_persistence.py# ★★ DB models + session stores (the core of conversation storage)
+│   │   ├── llm_factory.py, milvus_client.py, windows_event_loop.py
+│   ├── models/
+│   │   ├── request.py            # ChatRequest, ClearRequest, RenameSessionRequest ...
+│   │   ├── response.py           # SessionInfoResponse, ChatSessionListResponse, ChatSessionSummary ...
+│   │   ├── aiops.py, document.py
+│   ├── services/
+│   │   ├── rag_agent_service.py  # ★ RAG query + get_session_history_async + upsert calls
+│   │   ├── feedback_service.py, bug_service.py, + vector/RAG services
+│   ├── agent/, tools/, utils/
+├── static/                       # Frontend
+│   ├── index.html                # ★ Main chat UI (sidebar "近期对话")
+│   ├── app.js                    # ★★ SmartQAApp - all conversation JS
+│   ├── admin.html                # ★★ Admin backend (会话列表 tab + feedback context viewer)
+│   └── styles.css
+├── data/
+│   ├── chat_sessions.db          # ★ SQLite: chat_sessions + chat_messages tables
+│   ├── bug.db, feedback.db
+├── tests/
+│   ├── test_session_persistence.py, test_chat_sessions_api.py, test_rag_session_history.py, test_admin_timeline.py
+```
 
-## 2. 核心技术栈
-项目的技术选型体现了现代化、企业级 AI 应用的特征：
-- **Web 框架**: **FastAPI** (高性能，支持异步和流式响应 SSE)
-- **AI / 编排框架**: **LangChain** + **LangGraph** (构建复杂的工作流和有状态的 Agent)
-- **向量数据库**: **Milvus** (用于 RAG 系统的文档向量存储与高维检索)
-- **大模型生态**: OpenAI 兼容接口支持 (可无缝对接 DashScope、OpenAI 等)，同时集成了 **NVIDIA Rerank / BAAI bge-reranker** 用于检索重排序。
-- **状态存储**: **PostgreSQL** (用于 LangGraph 的 Checkpoint 持久化，实现会话中断恢复)
-- **工具集成协议**: **MCP (Model Context Protocol)** (解耦了 Agent 和底层监控/日志工具，如 CLS 和 Monitor)
+## 1. Frontend — "近期对话" (static/index.html + static/app.js)
+`index.html` sidebar contains `#newChatBtn` ("新建对话") and `#chatHistoryList` under a "近期对话" header. `app.js` defines class `SmartQAApp`.
 
-## 3. 分层架构解析
-项目在 `app/` 目录下采用了清晰的模块化分层架构：
+**Session ID per window:** generated client-side, so each browser tab/window is its own session:
+```js
+generateSessionId() { return 'session_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now(); }
+```
 
-### 3.1 接入层 (`app/api/`)
-基于 FastAPI 暴露 RESTful API 和 SSE 流式接口：
-- `chat.py`: 提供普通对话和流式对话 (`/api/chat`, `/api/chat_stream`)。
-- `aiops.py`: 暴露故障诊断流程触发接口。
-- `file.py`: 处理文档上传和向量化入口 (`/api/upload`)。
+**Dual storage (localStorage + server):**
+- `loadChatHistories()` / `saveChatHistories()` → `localStorage['chatHistories']` (max 50 entries).
+- `loadServerChatHistories()` → on init fetches `GET /api/chat/sessions`, merges server data with local (preserving local `messages`/`citations`/`messageId`), sorts by `updatedAt` desc, re-renders.
 
-### 3.2 代理逻辑层 (`app/agent/` & `app/services/`)
-这是系统的“大脑”，主要分为两类核心智能体：
-1. **RAG Agent (`rag_agent_service.py`)**: 
-   - 负责知识问答。结合了多轮对话上下文。
-2. **AIOps Agent (`app/agent/aiops/`)**: 
-   - 采用 **Plan-Execute-Replan** 架构。
-   - `planner.py`: 分析问题，制定 4-6 步的诊断计划。
-   - `executor.py`: 根据计划调用相应的 MCP 工具 (查询日志、看监控指标)。
-   - `replanner.py`: 评估工具返回结果，决定是继续下一步、调整计划还是输出最终根因报告。
+**Saving a conversation** (`saveCurrentChat`): title = first user message truncated to 30 chars; stores `{id, title, messages, createdAt, updatedAt}`. `updateCurrentChatHistory()` updates an existing entry.
 
-### 3.3 业务服务层 (`app/services/`)
-提供 Agent 运行所需的专业能力封装：
-- **检索与排序**: `rag_retrieval_service.py` 和 `rerank_service.py` 负责从 Milvus 召回粗排结果，并通过重排序模型 (Rerank) 提升精确度。
-- **向量化与预处理**: `document_splitter_service.py` 处理文档分块 (Chunking)；`vector_embedding_service.py` 和 `embedding_input_guard.py` 负责文本向量化及 Token 预算控制 (防溢出截断)。
-- **存储管理**: `vector_store_manager.py` 和 `vector_index_service.py` 封装对 Milvus 的索引和存储操作。
+**Rendering sidebar** (`renderChatHistory`): each item has rename (pencil) + delete (X) buttons and click-to-load. Rename → `PUT /api/chat/session/{id}/rename`. Delete → `POST /api/chat/clear` `{sessionId}`.
 
-### 3.4 基础设施与核心层 (`app/core/`, `app/models/`, `app/tools/`)
-- **Core 组件**: `llm_factory.py` (模型实例化)、`milvus_client.py` (数据库连接)、`session_persistence.py` (PostgreSQL 状态管理)。
-- **工具组件**: Agent 可调用的工具集，通过 `mcp_client.py` 动态加载外部 MCP 提供的能力。
-- **数据模型**: 基于 Pydantic 定义的 API 请求响应及内部传递数据结构 (`app/models/`)。
+**Loading a session** (`loadChatHistory`): prefers local `messages` (keeps citations/messageId); if local empty, fetches `GET /api/chat/session/{id}` and maps `role==='user'`→type user. Sets `isCurrentChatFromHistory=true`, re-renders messages via `addMessage`.
 
-## 4. 外部子系统集成
-- **MCP Servers (`mcp_servers/`)**: 项目不仅有主服务，还独立包含了符合 MCP 规范的服务端（如 `cls_server.py`, `monitor_server.py`），它们负责与真实运维环境对接获取数据。主服务通过 MCP 客户端与它们交互。
-- **Web 前端 (`static/`)**: 提供了原生的纯前端 HTML/JS/CSS 实现，支持对话交互、流式打字机效果及功能切换。
+**Streaming send** (`sendStreamMessage`): POSTs `{Id: sessionId, Question: message}` to `/api/chat_stream`, parses SSE events `retrieving`/`search_results`/`content`/`done`/`error`. On `done`, `handleStreamComplete` pushes the assistant message (with `messageId` + `citations`) into `currentChatHistory` and saves.
 
-## 5. 核心工作流总结
+## 2. Backend Chat/Session API (app/api/chat.py)
+Endpoints (all prefixed `/api`):
+- `POST /chat` — non-streaming RAG answer
+- `POST /chat_stream` — SSE streaming (EventSourceResponse)
+- `POST /chat/clear` — delete a session (`ClearRequest.sessionId`)
+- `GET /chat/sessions?limit=&offset=&user_id=` → `ChatSessionListResponse` (lists recent sessions, paginated)
+- `GET /chat/session/{session_id}` → `SessionInfoResponse` (full message history)
+- `PUT /chat/session/{session_id}/rename` → `ApiResponse` (`RenameSessionRequest.title`)
+- `GET /chat/suggestions` — popular questions from feedback likes
 
-### A. RAG 知识库问答工作流
-1. **文档摄入**: 用户上传 Markdown (`/api/upload`) -> 文本分块 (Chunking) -> 调用 Embedding 模型 -> 写入 Milvus 向量库。
-2. **问答检索**: 用户提问 -> Query 向量化 -> Milvus 召回 Top-K 候选 (Candidate Top-K=20) -> 调用 Rerank 模型精排 (Top-K=3) -> 拼装 Prompt -> LLM 生成回答并流式返回。
+## 3. Database Models & Schema (app/core/session_persistence.py) — THE KEY FILE
+Three interchangeable stores behind `SessionPersistenceManager`, chosen by `SESSION_CHECKPOINT_BACKEND` config. **Default ("memory" backend) uses SQLite** for session metadata+messages, plus a LangGraph `MemorySaver` checkpointer for live agent state.
 
-### B. AIOps 智能诊断工作流
-1. **触发诊断**: 用户提交报错/问题描述。
-2. **规划 (Plan)**: AIOps Planner LLM 生成初步诊断步骤。
-3. **执行 (Execute)**: 系统遍历步骤，Executor LLM 决定需要使用哪些 MCP 工具（如调用 `cls_server` 查日志）。
-4. **反思与重规划 (Replan)**: Replanner 根据工具执行结果更新状态，如果获取到足够信息则总结 Root Cause（根因），否则继续调整步骤执行。
+`SqliteSessionStore` (DB at `data/chat_sessions.db`) creates two tables:
+```sql
+CREATE TABLE chat_sessions (
+    session_id TEXT PRIMARY KEY, title TEXT DEFAULT '新对话',
+    created_at TEXT, updated_at TEXT,
+    last_message_preview TEXT DEFAULT '', message_count INTEGER DEFAULT 0, user_id TEXT DEFAULT '')
+CREATE TABLE chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, role TEXT,
+    content TEXT, created_at TEXT)
+-- indexes: idx_chat_messages_session, idx_chat_sessions_updated_at(DESC), idx_chat_sessions_user_id
+```
+- `upsert_session(metadata)`: upserts `chat_sessions` (preserves first-round title; only overwrites if title empty/"新对话"; increments `message_count`), then **appends two rows** to `chat_messages` (role `user` = question, role `assistant` = answer).
+- `get_messages(session_id)`: `SELECT role, content, created_at ... ORDER BY id ASC` → `{role, content, timestamp}`.
+- `list_sessions`: `ORDER BY updated_at DESC LIMIT ? OFFSET ?`, optional `user_id` filter.
+- `rename_session` / `delete_session` (deletes from both tables).
+- `PostgresSessionStore` mirrors this for production (note: Postgres store does NOT persist per-message rows — only session metadata; messages come from the checkpointer there).
+- `InMemorySessionStore`: dict-based, metadata only, lost on restart.
 
-## 6. 架构亮点
-1. **先进的 Agent 架构设计**: 使用 LangGraph 将 AIOps 的复杂分析过程拆解为状态图 (State Graph)，增强了系统的可控性和调试性。
-2. **企业级的容错与管控**: 
-   - 实现了 Embedding `Token 预算估算与截断`（`embedding_input_guard.py`），防止长文本超出模型上下文限制。
-   - `PostgreSQL 会话持久化` 支持 Agent 的跨服务重启状态保留。
-   - `Rerank 降级策略`，在重排序服务超时时能自动回退。
-3. **高扩展的工具协议**: 引入 MCP 规范，使得后续接入新的内部系统 (如 CMDB、工单系统) 只需要编写独立的 MCP Server，无需改动核心 Agent 代码。
+`SessionPersistenceManager` (singleton `session_persistence_manager`) facade methods: `upsert_chat_session`, `list_chat_sessions`, `count_chat_sessions`, `get_session_messages` (SQLite only), `delete_chat_session`, `rename_chat_session`. Initialized in `main.py` lifespan via `initialize_async()`; the checkpointer is injected into `rag_agent_service.configure_checkpointer(...)`.
+
+## 4. How conversations are stored per session/window
+1. Client generates `sessionId` per window, sends it as `Id` in every `/chat_stream` call.
+2. `rag_agent_service.query_stream()` runs the LangGraph RAG agent (checkpointer keyed by `thread_id=session_id` gives multi-turn memory), then after the answer completes calls:
+   ```python
+   session_persistence_manager.upsert_chat_session(session_id=session_id, question=question, answer=full_response)
+   ```
+   This writes the human-readable session row + the two message rows to SQLite. `message_id = f"msg_{session_id}_{timestamp_ms}"` is returned to the frontend for feedback linking.
+
+## 5. How conversation history is retrieved
+`rag_agent_service.get_session_history_async(session_id)` (chat.py `GET /chat/session/{id}` calls this):
+1. **First tries SQLite** via `session_persistence_manager.get_session_messages(session_id)` — survives restarts.
+2. **Falls back to the LangGraph checkpointer** (for postgres backend / in-memory runtime sessions) via `_checkpoint_to_history()`, which skips `SystemMessage`/`ToolMessage` and AIMessages with tool_calls, extracts the real user question out of the prompt template (`_extract_user_question` splits on "用户的问题："), returns `{role, content, timestamp}`.
+
+## 6. Admin backend displaying conversation history (static/admin.html, served at `/admin`)
+The admin page has tabs; conversation history is shown in two places, **both reusing the same `/api/chat/sessions` and `/api/chat/session/{id}` endpoints** (no separate admin chat endpoints):
+
+- **"💬 会话列表" tab** — `loadSessions()` calls `GET /api/chat/sessions?limit=PAGE_SIZE&offset=`, renders a table (会话ID, 标题, 消息数, 最后消息预览, 创建时间, "查看历史" button). `viewSessionDetail(sessionId)` calls `GET /api/chat/session/{id}` and renders the full 👤用户/🤖助手 conversation in modal `#sessionDetailModal`. `loadSessionsMore()` paginates.
+- **反馈 context viewer** — `viewFeedbackContext(idx)` fetches `GET /api/chat/session/{sessionId}` for a feedback item's session, tries to match the feedback's `question` to locate the turn, and shows the conversation from round 1 → the matched turn (with a warning if no exact match), in modal `#feedbackContextModal`.
+- **"全部" timeline** — `GET /api/admin/timeline` (admin.py) merges Bug + Feedback records sorted by `created_at` desc; feedback timeline items carry `session_id` and `message_id` so admins can jump to the related conversation. `admin.py` only defines `/admin/timeline` — the actual conversation listing/detail in admin uses the chat router's endpoints.
+
+## Data Models (app/models/request.py, response.py)
+- `ChatRequest`: `id` (alias `Id`), `question` (alias `Question`)
+- `ClearRequest`: `session_id` (alias `sessionId`)
+- `RenameSessionRequest`: `title` (1–100 chars)
+- `SessionInfoResponse`: `session_id`, `message_count`, `history: List[{role,content,timestamp}]`
+- `ChatSessionSummary`: `session_id, title, created_at, updated_at, last_message_preview, message_count`
+- `ChatSessionListResponse`: `total, limit, offset, sessions`
+
+## Key takeaway for replication
+To replicate "近期对话": (a) generate a per-window session ID client-side; (b) persist sessions in SQLite with a `chat_sessions` (metadata) + `chat_messages` (per-message) schema; (c) expose `GET /sessions` (list, paginated, ordered by updated_at desc) and `GET /session/{id}` (full messages) plus rename/clear endpoints; (d) on the frontend keep a localStorage mirror merged with server data, preferring local messages to retain citations/messageId; (e) for the admin, reuse the same list/detail endpoints in a sessions tab and link feedback/bug timeline items back via `session_id`.

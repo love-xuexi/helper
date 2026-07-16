@@ -1,6 +1,6 @@
 """向量检索服务模块"""
 
-from typing import Any, Dict, List
+from typing import Any
 
 from loguru import logger
 from pymilvus import Collection
@@ -39,14 +39,14 @@ class SearchResult:
         id: str,
         content: str,
         score: float,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
     ):
         self.id = id
         self.content = content
         self.score = score
         self.metadata = metadata
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """
         转换为字典
 
@@ -81,7 +81,7 @@ class VectorSearchService:
         """初始化向量检索服务"""
         logger.info("向量检索服务初始化完成")
 
-    def search_similar_documents(self, query: str, top_k: int = 5) -> List[SearchResult]:
+    def search_similar_documents(self, query: str, top_k: int = 5) -> list[SearchResult]:
         """
         搜索相似文档
 

@@ -38,7 +38,9 @@ def truncate_to_token_budget(text: str, max_tokens: int, keep: str = "tail") -> 
     source = reversed(text) if keep == "tail" else iter(text)
     selected = []
     for char in source:
-        candidate = "".join(reversed(selected + [char])) if keep == "tail" else "".join(selected + [char])
+        candidate = (
+            "".join(reversed(selected + [char])) if keep == "tail" else "".join(selected + [char])
+        )
         if estimate_tokens(candidate) > max_tokens:
             break
         selected.append(char)
@@ -116,7 +118,9 @@ def _score_segment(segment: str, index: int, total_segments: int) -> int:
     score = 0
     matches = _HIGH_SIGNAL_PATTERN.findall(segment)
     score += len(matches) * 4
-    if re.search(r"\b(?:[A-Za-z][A-Za-z0-9_-]*[-_])?[A-Za-z0-9_-]+(?:-api|-service|svc)\b", segment):
+    if re.search(
+        r"\b(?:[A-Za-z][A-Za-z0-9_-]*[-_])?[A-Za-z0-9_-]+(?:-api|-service|svc)\b", segment
+    ):
         score += 4
     if re.search(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", segment):
         score += 4

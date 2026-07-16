@@ -1,7 +1,6 @@
 """文档分割服务模块 - 基于 LangChain 的智能文档分割"""
 
 from pathlib import Path
-from typing import List
 
 from langchain_core.documents import Document
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
@@ -36,7 +35,9 @@ class DocumentSplitterService:
         """初始化文档分割服务"""
         self.chunk_size = config.chunk_max_size
         self.chunk_overlap = config.chunk_overlap
-        self.embedding_token_budget = max(1, config.embedding_max_tokens - config.embedding_token_safety_margin)
+        self.embedding_token_budget = max(
+            1, config.embedding_max_tokens - config.embedding_token_safety_margin
+        )
 
         # Markdown 标题分割器 (只按一级和二级标题分割，减少分片数)
         # 例如 Markdown 内容：
@@ -77,7 +78,7 @@ class DocumentSplitterService:
             f"overlap={self.chunk_overlap}"
         )
 
-    def split_markdown(self, content: str, file_path: str = "") -> List[Document]:
+    def split_markdown(self, content: str, file_path: str = "") -> list[Document]:
         """
         分割 Markdown 文档 (两阶段分割 + 合并小片段)
 
@@ -141,7 +142,7 @@ class DocumentSplitterService:
             logger.error(f"Markdown 分割失败: {file_path}, 错误: {e}")
             raise
 
-    def split_text(self, content: str, file_path: str = "") -> List[Document]:
+    def split_text(self, content: str, file_path: str = "") -> list[Document]:
         """
         分割普通文本文档
 
@@ -196,7 +197,7 @@ class DocumentSplitterService:
             logger.error(f"文本分割失败: {file_path}, 错误: {e}")
             raise
 
-    def split_document(self, content: str, file_path: str = "") -> List[Document]:
+    def split_document(self, content: str, file_path: str = "") -> list[Document]:
         """
         智能分割文档 (根据文件类型选择分割器)
 
@@ -216,9 +217,7 @@ class DocumentSplitterService:
         else:
             return self.split_text(content, file_path)
 
-    def _merge_small_chunks(
-        self, documents: List[Document], min_size: int = 300
-    ) -> List[Document]:
+    def _merge_small_chunks(self, documents: list[Document], min_size: int = 300) -> list[Document]:
         """
         合并太小的分片
 
@@ -272,11 +271,11 @@ class DocumentSplitterService:
 
         return merged_docs
 
-    def _enforce_embedding_token_budget(self, documents: List[Document]) -> List[Document]:
+    def _enforce_embedding_token_budget(self, documents: list[Document]) -> list[Document]:
         if not documents:
             return []
 
-        safe_docs: List[Document] = []
+        safe_docs: list[Document] = []
         oversized_count = 0
 
         for doc in documents:
@@ -302,14 +301,16 @@ class DocumentSplitterService:
 
         return safe_docs
 
-    def _hard_split_document(self, document: Document) -> List[Document]:
-        chunks: List[Document] = []
+    def _hard_split_document(self, document: Document) -> list[Document]:
+        chunks: list[Document] = []
         current = ""
 
         for char in document.page_content:
             candidate = current + char
             if current and estimate_tokens(candidate) > self.embedding_token_budget:
-                chunks.append(Document(page_content=current.strip(), metadata=dict(document.metadata)))
+                chunks.append(
+                    Document(page_content=current.strip(), metadata=dict(document.metadata))
+                )
                 current = char
             else:
                 current = candidate

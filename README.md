@@ -86,6 +86,9 @@ notepad .env
 | Bug详情 | GET | `/api/bug/{id}` | 获取单条 Bug 详情 |
 | 更新Bug状态 | PUT | `/api/bug/{id}/status` | 更新 Bug 状态 |
 | Bug统计 | GET | `/api/bug/stats` | 总数、状态分布、分类分布 |
+| Bug时间线 | GET | `/api/bug/timeline` | Bug 按时间倒序（管理后台用） |
+| 全部时间线 | GET | `/api/admin/timeline` | Bug + 反馈合并，按时间倒序 |
+| 反馈时间线 | GET | `/api/feedback/timeline` | 反馈按时间倒序（管理后台用） |
 | 知识库列表 | GET | `/api/knowledge-bases` | 列出所有知识库 |
 | 文档列表 | GET | `/api/knowledge-bases/{kb_id}/docs` | 指定知识库的文档 |
 | 上传文档 | POST | `/api/upload` | multipart 上传文档到知识库 |
@@ -192,8 +195,11 @@ BUG_UPLOAD_DIR=./data/uploads
 
 # 会话持久化（memory 或 postgres）
 SESSION_CHECKPOINT_BACKEND=memory
+# 会话元数据 + 消息记录的 SQLite 路径（memory 后端使用，重启后保留）
+SESSION_DB_PATH=./data/chat_sessions.db
 # 当后端为 postgres 时使用
 POSTGRES_DSN=postgresql://superbiz:superbiz_dev@localhost:5432/super_biz_agent
+POSTGRES_CONNECT_TIMEOUT_SECONDS=10
 ```
 
 > 旧的 Milvus / Embedding / Rerank / 分块配置（`MILVUS_*`、`EMBEDDING_*`、`RERANK_*`、`CHUNK_*`）已不再使用，仅在 `.env.example` 中保留以便兼容，可忽略。
@@ -206,10 +212,11 @@ helper/
 │   ├── main.py                         # FastAPI 应用入口
 │   ├── config.py                       # 配置管理
 │   ├── api/                            # API 路由层
-│   │   ├── chat.py                     # 对话接口（RAG + 引用）
+│   │   ├── chat.py                     # 对话接口（RAG + 引用 + 会话历史）
 │   │   ├── feedback.py                 # 反馈评价接口
 │   │   ├── bug.py                      # Bug 上报接口
 │   │   ├── file.py                     # 文件上传 + 知识库管理
+│   │   ├── admin.py                    # 管理后台聚合接口（时间线）
 │   │   ├── health.py                   # 健康检查
 │   │   └── aiops.py                    # AIOps（预留）
 │   ├── services/                       # 业务服务层
@@ -218,7 +225,9 @@ helper/
 │   │   ├── feedback_service.py         # 反馈评价服务（SQLite）
 │   │   └── bug_service.py              # Bug 上报服务（SQLite + 附件）
 │   ├── models/                         # 数据模型
-│   ├── core/                           # 核心组件（LLM工厂、会话持久化）
+│   ├── core/                           # 核心组件
+│   │   ├── llm_factory.py              # LLM 工厂
+│   │   └── session_persistence.py      # 会话持久化（SQLite + Checkpointer）
 │   └── tools/                           # 工具模块
 ├── static/                             # Web 前端
 │   ├── index.html                      # 主页面
@@ -226,6 +235,10 @@ helper/
 │   ├── app.js                          # 前端逻辑
 │   └── styles.css                      # 样式表
 ├── data/                               # 数据目录（反馈数据库）
+│   ├── feedback.db                    # 反馈评价数据库（SQLite）
+│   ├── bug.db                         # Bug 上报数据库（SQLite）
+│   ├── chat_sessions.db               # 会话历史数据库（SQLite）
+│   └── uploads/                       # Bug 附件存储目录
 ├── .env                                # 环境变量配置
 ├── .env.example                        # 环境变量模板
 ├── start-windows.bat                   # Windows 启动脚本
@@ -272,8 +285,9 @@ helper/
 ### 代码质量
 
 ```bash
-# 格式化
-black app/ && isort app/
+# 格式化（ruff，line-length=100）
+ruff format app/
+ruff check --fix app/
 
 # 代码检查
 ruff check app/

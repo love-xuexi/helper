@@ -16,7 +16,24 @@ from app.services.kb_api_client import KbApiError, kb_api_client
 router = APIRouter()
 
 # 支持的文件类型（知识库平台支持多种格式：PDF/Word/Excel/图片等）
-ALLOWED_EXTENSIONS = {"pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "markdown", "csv", "png", "jpg", "jpeg", "gif", "bmp"}
+ALLOWED_EXTENSIONS = {
+    "pdf",
+    "doc",
+    "docx",
+    "xls",
+    "xlsx",
+    "ppt",
+    "pptx",
+    "txt",
+    "md",
+    "markdown",
+    "csv",
+    "png",
+    "jpg",
+    "jpeg",
+    "gif",
+    "bmp",
+}
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
 
@@ -53,7 +70,10 @@ async def upload_file(
         # 读取文件内容
         content = await file.read()
         if len(content) > MAX_FILE_SIZE:
-            raise HTTPException(status_code=400, detail=f"文件大小超过限制（最大 {MAX_FILE_SIZE // 1024 // 1024}MB）")
+            raise HTTPException(
+                status_code=400,
+                detail=f"文件大小超过限制（最大 {MAX_FILE_SIZE // 1024 // 1024}MB）",
+            )
 
         logger.info(f"[File] 上传文件: {file.filename}, size={len(content)}, kb_id={kb_id}")
 

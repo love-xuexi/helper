@@ -23,7 +23,6 @@ from loguru import logger
 
 from app.config import config
 
-
 # 预设的 Bug 分类
 BUG_CATEGORIES = [
     "检索问题",
@@ -76,21 +75,11 @@ class BugStore:
             )
             # 兼容已存在的旧表：补 user_id 列
             self._ensure_column(conn, "bugs", "user_id", "TEXT NOT NULL DEFAULT ''")
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_bugs_status ON bugs(status)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_bugs_category ON bugs(category)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_bugs_session ON bugs(session_id)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_bugs_created ON bugs(created_at DESC)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_bugs_user ON bugs(user_id)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_bugs_status ON bugs(status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_bugs_category ON bugs(category)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_bugs_session ON bugs(session_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_bugs_created ON bugs(created_at DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_bugs_user ON bugs(user_id)")
         self._initialized = True
         logger.info(f"[BugStore] 数据库初始化完成: {self.db_path}")
 
@@ -130,9 +119,18 @@ class BugStore:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    reporter or "anonymous", category, title, content,
-                    session_id, query, answer, "待处理", attachment_path,
-                    now, now, user_id,
+                    reporter or "anonymous",
+                    category,
+                    title,
+                    content,
+                    session_id,
+                    query,
+                    answer,
+                    "待处理",
+                    attachment_path,
+                    now,
+                    now,
+                    user_id,
                 ),
             )
             bug_id = cursor.lastrowid
@@ -144,9 +142,7 @@ class BugStore:
     def get_bug(self, bug_id: int) -> dict[str, Any] | None:
         """获取单条 Bug。"""
         with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT * FROM bugs WHERE id = ?", (bug_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM bugs WHERE id = ?", (bug_id,)).fetchone()
         return self._row_to_dict(row) if row else None
 
     def list_bugs(

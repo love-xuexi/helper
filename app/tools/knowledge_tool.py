@@ -4,7 +4,7 @@
 当前 RAG 服务采用直接检索流程（非 Agent 工具调用），此工具保留供未来扩展使用。
 """
 
-from typing import Any, List, Tuple
+from typing import Any
 
 from langchain_core.tools import tool
 from loguru import logger
@@ -13,7 +13,7 @@ from app.services.kb_api_client import kb_api_client
 
 
 @tool
-async def retrieve_knowledge(query: str) -> Tuple[str, List[dict[str, Any]]]:
+async def retrieve_knowledge(query: str) -> tuple[str, list[dict[str, Any]]]:
     """从知识库中检索相关信息来回答问题。
 
     当用户的问题涉及专业知识、文档内容或需要参考资料时，使用此工具。
@@ -43,7 +43,7 @@ async def retrieve_knowledge(query: str) -> Tuple[str, List[dict[str, Any]]]:
         return f"检索知识时发生错误: {str(e)}", []
 
 
-def _format_chunks(chunks: List[Any]) -> Tuple[str, List[dict[str, Any]]]:
+def _format_chunks(chunks: list[Any]) -> tuple[str, list[dict[str, Any]]]:
     """格式化检索结果为上下文文本 + 引用列表。"""
     context_parts: list[str] = []
     citations: list[dict[str, Any]] = []

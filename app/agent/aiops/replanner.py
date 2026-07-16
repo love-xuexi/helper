@@ -17,14 +17,16 @@ replanner 会根据当前剩余计划 plan 和已执行结果 past_steps 判断�
 """
 
 from textwrap import dedent
-from typing import Dict, Any, List
-from langchain_core.prompts import ChatPromptTemplate
-from pydantic import BaseModel, Field
-from loguru import logger
+from typing import Any
 
+from langchain_core.prompts import ChatPromptTemplate
+from loguru import logger
+from pydantic import BaseModel, Field
+
+from app.agent.mcp_client import get_mcp_client_with_retry
 from app.core.llm_factory import llm_factory
 from app.tools import get_current_time, retrieve_knowledge
-from app.agent.mcp_client import get_mcp_client_with_retry
+
 from .state import PlanExecuteState
 from .utils import format_tools_description
 
@@ -36,6 +38,7 @@ class Response(BaseModel):
     也就是说，大模型最后应该输出：
     Response(response="Markdown 格式最终报告")
     """
+
     response: str = Field(description="对用户的最终响应")
 
 
@@ -51,6 +54,7 @@ class Act(BaseModel):
 
     其中 action 决定 replanner 接下来返回什么状态增量。
     """
+
     action: str = Field(
         description="""下一步的行动，必须是以下三种之一：
         - 'continue': 当前计划合理，继续执行下一个步骤
@@ -59,9 +63,9 @@ class Act(BaseModel):
     )
     # action 为 'replan' 时，新的步骤列表（会替换当前剩余计划）
     # action 为 continue/respond 时，通常为空列表。
-    new_steps: List[str] = Field(
+    new_steps: list[str] = Field(
         default_factory=list,
-        description="新的步骤列表（如果 action 是 'replan'，这些步骤会替换剩余计划）"
+        description="新的步骤列表（如果 action 是 'replan'，这些步骤会替换剩余计划）",
     )
 
 
@@ -112,7 +116,7 @@ replanner_prompt = ChatPromptTemplate.from_messages(
                 - 剩余步骤是否真的"必需"？
                 - 已执行步骤数是否过多（>= 5）？如果是，立即 respond
 
-                **决策优先级口诀：** 
+                **决策优先级口诀：**
                 "优先结束 > 保持不变 > 调整计划"
                 "信息足够就响应，不要追求完美"
             """).strip(),
@@ -144,7 +148,7 @@ response_prompt = ChatPromptTemplate.from_messages(
 )
 
 
-async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
+async def replanner(state: PlanExecuteState) -> dict[str, Any]:
     """
     重新规划节点：决定是继续、调整计划还是生成最终响应
 
@@ -187,7 +191,9 @@ async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
     # 如果 planner/replanner 一直追加步骤，最多执行 MAX_STEPS 次后强制生成报告。
     MAX_STEPS = 8
     if len(past_steps) >= MAX_STEPS:
-        logger.warning(f"已执行 {len(past_steps)} 个步骤，超过最大限制 {MAX_STEPS}，强制生成最终响应")
+        logger.warning(
+            f"已执行 {len(past_steps)} 个步骤，超过最大限制 {MAX_STEPS}，强制生成最终响应"
+        )
         llm = llm_factory.create_chat_model(
             temperature=0,
             streaming=False,
@@ -199,10 +205,7 @@ async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
     # 这样在 replan 时可以生成合理的新步骤。
     try:
         # 获取本地工具
-        local_tools = [
-            get_current_time,
-            retrieve_knowledge
-        ]
+        local_tools = [get_current_time, retrieve_knowledge]
 
         # 获取 MCP 工具
         # 例如远程告警查询、日志查询、指标查询工具。
@@ -234,10 +237,9 @@ async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
     #     ("查询日志", "发现 timeout 日志...")
     # ]
     # 这里把它转成文本，供 replanner 判断信息是否足够。
-    steps_summary = "\n".join([
-        f"步骤: {step}\n结果: {result[:300]}..."
-        for step, result in past_steps
-    ])
+    steps_summary = "\n".join(
+        [f"步骤: {step}\n结果: {result[:300]}..." for step, result in past_steps]
+    )
 
     # 如果还有剩余计划，进行决策
     # 有剩余 plan 时，replanner 要判断：继续执行、替换计划、还是提前生成最终响应。
@@ -258,14 +260,16 @@ async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
                 ("user", f"原始任务: {input_text}"),
                 ("user", f"已执行的步骤:\n{steps_summary}"),
                 ("user", f"剩余计划: {', '.join(plan)}"),
-                ("user", f"⚠️ 重要提示：已执行 {len(past_steps)} 个步骤，请优先考虑是否信息已足够生成响应（respond）")
+                (
+                    "user",
+                    f"⚠️ 重要提示：已执行 {len(past_steps)} 个步骤，请优先考虑是否信息已足够生成响应（respond）",
+                ),
             ]
 
             # 调用模型进行结构化决策，返回 Act 或 dict。
-            act = await replanner_chain.ainvoke({
-                "messages": messages,
-                "tools_description": tools_description
-            })
+            act = await replanner_chain.ainvoke(
+                {"messages": messages, "tools_description": tools_description}
+            )
 
             # 处理返回结果
             # 正常情况下 act 是 Act 对象；
@@ -293,14 +297,14 @@ async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
                         f"新步骤数 {len(new_steps)} > 剩余步骤数 {len(plan)}，"
                         f"强制截断为 {len(plan)} 个步骤"
                     )
-                    new_steps = new_steps[:len(plan)]
-                
+                    new_steps = new_steps[: len(plan)]
+
                 # ⚠️ 二次检查：如果已执行步骤 >= 5，禁止 replan
                 # 已经执行较多步骤时，优先收敛输出报告，而不是继续改计划。
                 if len(past_steps) >= 5:
                     logger.warning(f"已执行 {len(past_steps)} 个步骤，禁止重新规划，强制生成响应")
                     return await _generate_response(state, llm)
-                
+
                 logger.info(f"决定调整计划，新步骤数量: {len(new_steps)}")
                 if new_steps:
                     # 替换剩余计划
@@ -329,7 +333,7 @@ async def replanner(state: PlanExecuteState) -> Dict[str, Any]:
         return await _generate_response(state, llm)
 
 
-async def _generate_response(state: PlanExecuteState, llm: Any) -> Dict[str, Any]:
+async def _generate_response(state: PlanExecuteState, llm: Any) -> dict[str, Any]:
     """生成最终响应
 
     这个函数把原始任务 input 和执行历史 past_steps 交给大模型，
@@ -350,10 +354,9 @@ async def _generate_response(state: PlanExecuteState, llm: Any) -> Dict[str, Any
 
     # 格式化执行历史
     # 把 past_steps 转成 Markdown 片段，让模型能清楚看到每一步的证据。
-    execution_history = "\n\n".join([
-        f"### 步骤: {step}\n**结果:**\n{result}"
-        for step, result in past_steps
-    ])
+    execution_history = "\n\n".join(
+        [f"### 步骤: {step}\n**结果:**\n{result}" for step, result in past_steps]
+    )
 
     # response_prompt | llm.with_structured_output(Response)
     # 表示要求模型输出 Response(response="...") 结构。
@@ -365,7 +368,7 @@ async def _generate_response(state: PlanExecuteState, llm: Any) -> Dict[str, Any
         messages = [
             ("user", f"原始任务: {input_text}"),
             ("user", f"执行历史:\n{execution_history}"),
-            ("user", "请基于以上信息生成全面的最终响应")
+            ("user", "请基于以上信息生成全面的最终响应"),
         ]
 
         # 调用大模型生成结构化最终响应。

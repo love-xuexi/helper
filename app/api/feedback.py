@@ -56,7 +56,9 @@ async def submit_feedback(request: FeedbackRequest) -> FeedbackResponse:
         # 校验：dislike 时建议填写 tags 或 description，但不强制
         if request.rating == "dislike":
             if not request.feedback_tags and not request.feedback_description:
-                logger.info(f"[Feedback] dislike 反馈未填写具体原因, message_id={request.message_id}")
+                logger.info(
+                    f"[Feedback] dislike 反馈未填写具体原因, message_id={request.message_id}"
+                )
 
         result = await feedback_service.submit_feedback(
             session_id=request.session_id,

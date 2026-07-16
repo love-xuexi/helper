@@ -60,7 +60,9 @@ def test_timeline_merges_bugs_and_feedbacks_by_time(monkeypatch):
     ]
 
     monkeypatch.setattr(
-        bug_service, "list_bugs", lambda limit=50, offset=0, status=None, category=None, user_id=None: bugs
+        bug_service,
+        "list_bugs",
+        lambda limit=50, offset=0, status=None, category=None, user_id=None: bugs,
     )
     monkeypatch.setattr(
         feedback_service,
@@ -92,7 +94,9 @@ def test_timeline_pagination(monkeypatch):
     feedbacks = []
 
     monkeypatch.setattr(
-        bug_service, "list_bugs", lambda limit=50, offset=0, status=None, category=None, user_id=None: bugs
+        bug_service,
+        "list_bugs",
+        lambda limit=50, offset=0, status=None, category=None, user_id=None: bugs,
     )
     monkeypatch.setattr(
         feedback_service,

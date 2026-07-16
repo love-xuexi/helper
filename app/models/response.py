@@ -3,7 +3,7 @@
 定义 API 响应的 Pydantic 模型
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -30,10 +30,10 @@ class ChatResultData(BaseModel):
     """对话返回数据（含引用来源）"""
 
     success: bool = Field(..., description="是否成功")
-    answer: Optional[str] = Field(None, description="AI 回答")
-    citations: List[Dict[str, Any]] = Field(default_factory=list, description="引用来源列表")
-    message_id: Optional[str] = Field(None, description="消息 ID（用于反馈关联）")
-    error_message: Optional[str] = Field(None, description="错误信息")
+    answer: str | None = Field(None, description="AI 回答")
+    citations: list[dict[str, Any]] = Field(default_factory=list, description="引用来源列表")
+    message_id: str | None = Field(None, description="消息 ID（用于反馈关联）")
+    error_message: str | None = Field(None, description="错误信息")
 
 
 class SessionInfoResponse(BaseModel):
@@ -41,7 +41,7 @@ class SessionInfoResponse(BaseModel):
 
     session_id: str = Field(..., description="会话 ID")
     message_count: int = Field(..., description="消息数量")
-    history: List[Dict[str, str]] = Field(..., description="历史消息列表")
+    history: list[dict[str, str]] = Field(..., description="历史消息列表")
 
 
 class ChatSessionSummary(BaseModel):
@@ -57,7 +57,7 @@ class ChatSessionListResponse(BaseModel):
     total: int = Field(..., description="会话总数")
     limit: int = Field(..., description="每页数量")
     offset: int = Field(..., description="偏移量")
-    sessions: List[ChatSessionSummary] = Field(default_factory=list, description="会话列表")
+    sessions: list[ChatSessionSummary] = Field(default_factory=list, description="会话列表")
 
 
 class ApiResponse(BaseModel):
@@ -65,7 +65,7 @@ class ApiResponse(BaseModel):
 
     status: str = Field(..., description="状态")
     message: str = Field(..., description="消息")
-    data: Optional[Any] = Field(None, description="数据")
+    data: Any | None = Field(None, description="数据")
 
 
 class SimpleApiResponse(BaseModel):
@@ -73,7 +73,7 @@ class SimpleApiResponse(BaseModel):
 
     status: str = Field(..., description="状态")
     message: str = Field(..., description="消息")
-    data: Optional[Any] = Field(None, description="数据")
+    data: Any | None = Field(None, description="数据")
 
 
 class HealthResponse(BaseModel):
@@ -89,7 +89,7 @@ class FeedbackResponse(BaseModel):
 
     status: str = Field(..., description="状态")
     message: str = Field(..., description="消息")
-    data: Optional[Dict[str, Any]] = Field(None, description="反馈数据")
+    data: dict[str, Any] | None = Field(None, description="反馈数据")
 
 
 class FeedbackListResponse(BaseModel):
@@ -98,7 +98,7 @@ class FeedbackListResponse(BaseModel):
     total: int = Field(..., description="反馈总数")
     limit: int = Field(..., description="每页数量")
     offset: int = Field(..., description="偏移量")
-    items: List[Dict[str, Any]] = Field(default_factory=list, description="反馈列表")
+    items: list[dict[str, Any]] = Field(default_factory=list, description="反馈列表")
 
 
 class FeedbackStatsResponse(BaseModel):
@@ -106,7 +106,7 @@ class FeedbackStatsResponse(BaseModel):
 
     status: str = Field(..., description="状态")
     message: str = Field(..., description="消息")
-    data: Optional[Dict[str, Any]] = Field(None, description="统计数据")
+    data: dict[str, Any] | None = Field(None, description="统计数据")
 
 
 class KnowledgeBaseInfo(BaseModel):
@@ -131,7 +131,7 @@ class BugListResponse(BaseModel):
 
     total: int = Field(..., description="Bug 总数")
     limit: int = Field(..., description="每页数量")
-    items: List[Dict[str, Any]] = Field(default_factory=list, description="Bug 列表")
+    items: list[dict[str, Any]] = Field(default_factory=list, description="Bug 列表")
 
 
 class BugStatsResponse(BaseModel):
@@ -139,4 +139,4 @@ class BugStatsResponse(BaseModel):
 
     status: str = Field(..., description="状态")
     message: str = Field(..., description="消息")
-    data: Optional[Dict[str, Any]] = Field(None, description="统计数据")
+    data: dict[str, Any] | None = Field(None, description="统计数据")

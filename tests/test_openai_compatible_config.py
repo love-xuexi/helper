@@ -191,7 +191,8 @@ def test_embedding_service_compresses_long_query_before_api_call():
         client_factory=FakeOpenAI,
     )
     long_query = (
-        "普通上下文" * 500 + " 服务 order-api CPU 99% timeout HTTP 503 service unavailable 错误码 E5002"
+        "普通上下文" * 500
+        + " 服务 order-api CPU 99% timeout HTTP 503 service unavailable 错误码 E5002"
     )
 
     result = embeddings.embed_query(long_query)

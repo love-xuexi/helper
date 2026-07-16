@@ -75,9 +75,7 @@ async def get_admin_timeline(
         fetch_limit = offset + limit
 
         bugs = bug_service.list_bugs(limit=fetch_limit, offset=0, user_id=user_id)
-        feedbacks = feedback_service.list_feedback(
-            limit=fetch_limit, offset=0, user_id=user_id
-        )
+        feedbacks = feedback_service.list_feedback(limit=fetch_limit, offset=0, user_id=user_id)
 
         items = [_bug_to_timeline_item(b) for b in bugs]
         items.extend(_feedback_to_timeline_item(f) for f in feedbacks)

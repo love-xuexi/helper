@@ -1,4 +1,4 @@
-from typing import Any, List, Optional
+from typing import Any
 
 from langchain_core.documents import Document
 from loguru import logger
@@ -11,22 +11,28 @@ from app.services.rerank_service import rerank_service
 class RagRetrievalService:
     def __init__(
         self,
-        vector_store_manager: Optional[Any] = None,
-        reranker: Optional[Any] = None,
-        candidate_top_k: Optional[int] = None,
-        final_top_k: Optional[int] = None,
-        rerank_enabled: Optional[bool] = None,
+        vector_store_manager: Any | None = None,
+        reranker: Any | None = None,
+        candidate_top_k: int | None = None,
+        final_top_k: int | None = None,
+        rerank_enabled: bool | None = None,
     ):
         self.vector_store_manager = vector_store_manager
         self.reranker = reranker or rerank_service
-        self.candidate_top_k = candidate_top_k if candidate_top_k is not None else config.rag_candidate_top_k
+        self.candidate_top_k = (
+            candidate_top_k if candidate_top_k is not None else config.rag_candidate_top_k
+        )
         self.final_top_k = final_top_k if final_top_k is not None else config.rag_top_k
-        self.rerank_enabled = rerank_enabled if rerank_enabled is not None else config.rerank_enabled
+        self.rerank_enabled = (
+            rerank_enabled if rerank_enabled is not None else config.rerank_enabled
+        )
 
-    def retrieve(self, query: str) -> List[Document]:
+    def retrieve(self, query: str) -> list[Document]:
         vector_store_manager = self.vector_store_manager or self._get_vector_store_manager()
         candidate_top_k = max(self.candidate_top_k, self.final_top_k)
-        embedding_token_budget = max(1, config.embedding_max_tokens - config.embedding_token_safety_margin)
+        embedding_token_budget = max(
+            1, config.embedding_max_tokens - config.embedding_token_safety_margin
+        )
         safe_query = compress_query_for_embedding(query, max_tokens=embedding_token_budget)
         if safe_query != query:
             logger.warning(
@@ -44,7 +50,9 @@ class RagRetrievalService:
             logger.warning("RAG 检索未召回候选文档")
             return []
 
-        logger.info(f"RAG 向量召回完成: 候选数={len(candidate_docs)}, candidate_top_k={candidate_top_k}")
+        logger.info(
+            f"RAG 向量召回完成: 候选数={len(candidate_docs)}, candidate_top_k={candidate_top_k}"
+        )
 
         if not self.rerank_enabled:
             return candidate_docs[: self.final_top_k]

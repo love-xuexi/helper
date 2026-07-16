@@ -9,7 +9,6 @@
   GET   /api/bug/categories   获取预设分类列表
 """
 
-import os
 from datetime import datetime
 from pathlib import Path
 
@@ -24,9 +23,25 @@ router = APIRouter()
 # 附件大小限制 20MB
 MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024
 ALLOWED_ATTACHMENT_EXTENSIONS = {
-    "png", "jpg", "jpeg", "gif", "bmp", "webp",
-    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
-    "txt", "md", "csv", "log", "zip", "json",
+    "png",
+    "jpg",
+    "jpeg",
+    "gif",
+    "bmp",
+    "webp",
+    "pdf",
+    "doc",
+    "docx",
+    "xls",
+    "xlsx",
+    "ppt",
+    "pptx",
+    "txt",
+    "md",
+    "csv",
+    "log",
+    "zip",
+    "json",
 }
 
 
@@ -66,7 +81,9 @@ async def report_bug(
         attachment_path = ""
 
         if attachment and attachment.filename:
-            ext = attachment.filename.rsplit(".", 1)[-1].lower() if "." in attachment.filename else ""
+            ext = (
+                attachment.filename.rsplit(".", 1)[-1].lower() if "." in attachment.filename else ""
+            )
             if ext not in ALLOWED_ATTACHMENT_EXTENSIONS:
                 raise HTTPException(
                     status_code=400,
@@ -134,7 +151,9 @@ async def list_bugs(
         if status and status not in BUG_STATUSES:
             raise HTTPException(status_code=400, detail=f"status 必须是: {', '.join(BUG_STATUSES)}")
         if category and category not in BUG_CATEGORIES:
-            raise HTTPException(status_code=400, detail=f"category 必须是: {', '.join(BUG_CATEGORIES)}")
+            raise HTTPException(
+                status_code=400, detail=f"category 必须是: {', '.join(BUG_CATEGORIES)}"
+            )
 
         items = bug_service.list_bugs(
             limit=limit, offset=offset, status=status, category=category, user_id=user_id
@@ -222,7 +241,9 @@ async def get_bug(bug_id: int) -> JSONResponse:
 
 
 @router.put("/bug/{bug_id}/status")
-async def update_bug_status(bug_id: int, status: str = Query(..., description="新状态")) -> JSONResponse:
+async def update_bug_status(
+    bug_id: int, status: str = Query(..., description="新状态")
+) -> JSONResponse:
     """更新 Bug 状态。"""
     try:
         if status not in BUG_STATUSES:
