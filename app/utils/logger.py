@@ -46,7 +46,7 @@ def setup_logger():
 
     # 添加文件输出（按天轮转，自动压缩）
     logger.add(
-        "logs/app_{time:YYYY-MM-DD}.log",
+        "logs/app/app_{time:YYYY-MM-DD}.log",
         rotation="00:00",  # 每天0点自动切割新日志文件
         retention="7 days",  # 仅保留最近7天的日志
         compression="zip",  # 过期日志自动压缩为zip

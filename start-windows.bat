@@ -141,9 +141,12 @@ if errorlevel 1 (
 echo.
 
 echo [7/7] Starting FastAPI service...
-if exist "server.log" del "server.log"
-if exist "server_error.log" del "server_error.log"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process -FilePath '%PYTHON_CMD%' -ArgumentList '-m','app.run_server' -RedirectStandardOutput 'server.log' -RedirectStandardError 'server_error.log' -WindowStyle Hidden -PassThru; Set-Content -Path 'server.pid' -Value $p.Id -NoNewline -Encoding ascii"
+if not exist "logs\server" mkdir "logs\server"
+for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "LOG_TS=%%I"
+set "SERVER_LOG=logs\server\server_!LOG_TS!.log"
+set "SERVER_ERR_LOG=logs\server\server_error_!LOG_TS!.log"
+echo [INFO] Log files: !SERVER_LOG! ^| !SERVER_ERR_LOG!
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process -FilePath '%PYTHON_CMD%' -ArgumentList '-m','app.run_server' -RedirectStandardOutput '!SERVER_LOG!' -RedirectStandardError '!SERVER_ERR_LOG!' -WindowStyle Hidden -PassThru; Set-Content -Path 'server.pid' -Value $p.Id -NoNewline -Encoding ascii"
 if errorlevel 1 (
     echo [ERROR] Failed to start FastAPI service.
     goto :fail
@@ -156,19 +159,19 @@ set /a ATTEMPTS+=1
 if !ATTEMPTS! GTR 30 (
     echo [WARN] API did not become healthy within 30 seconds.
     echo.
-    echo [INFO] --- Recent server.log ^(last 30 lines^) ---
-    if exist "server.log" (
-        powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -Path 'server.log' -Tail 30 -Encoding UTF8"
+    echo [INFO] --- Recent !SERVER_LOG! ^(last 30 lines^) ---
+    if exist "!SERVER_LOG!" (
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -Path '!SERVER_LOG!' -Tail 30 -Encoding UTF8"
     ) else (
-        echo [WARN] server.log was not created.
+        echo [WARN] !SERVER_LOG! was not created.
     )
     echo.
-    echo [INFO] --- Recent server_error.log ^(last 30 lines^) ---
-    if exist "server_error.log" (
-        powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -Path 'server_error.log' -Tail 30 -Encoding UTF8"
+    echo [INFO] --- Recent !SERVER_ERR_LOG! ^(last 30 lines^) ---
+    if exist "!SERVER_ERR_LOG!" (
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -Path '!SERVER_ERR_LOG!' -Tail 30 -Encoding UTF8"
     )
     echo.
-    echo [TIP] Full logs: server.log, server_error.log, logs\app_*.log
+    echo [TIP] Full logs: !SERVER_LOG!, !SERVER_ERR_LOG!, logs\app\app_*.log
     goto :fail
 )
 curl -s http://localhost:9983/api/health >nul 2>&1
@@ -179,8 +182,8 @@ if errorlevel 1 (
 echo [OK] FastAPI is healthy (ready in !ATTEMPTS!s).
 echo.
 echo [INFO] --- Recent startup logs (last 15 lines) ---
-if exist "server.log" (
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -Path 'server.log' -Tail 15 -Encoding UTF8"
+if exist "!SERVER_LOG!" (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -Path '!SERVER_LOG!' -Tail 15 -Encoding UTF8"
 )
 echo.
 echo ====================================
@@ -190,11 +193,11 @@ echo Web UI:      http://localhost:9983
 echo API docs:    http://localhost:9983/docs
 echo.
 echo Logs:
-echo   server.log          - uvicorn + stdout (startup + runtime)
-echo   server_error.log    - stderr (errors/crashes)
-echo   logs\app_*.log      - loguru structured logs (daily rotation)
+echo   !SERVER_LOG!   - uvicorn + stdout (startup + runtime)
+echo   !SERVER_ERR_LOG!   - stderr (errors/crashes)
+echo   logs\app\app_*.log   - loguru structured logs (daily rotation)
 echo.
-echo Live tail:   powershell -NoProfile -Command "Get-Content -Path server.log -Wait -Tail 80 -Encoding UTF8"
+echo Live tail:   powershell -NoProfile -Command "Get-Content -Path '!SERVER_LOG!' -Wait -Tail 80 -Encoding UTF8"
 echo Stop:        stop-windows.bat
 echo.
 echo [NOTE] Knowledge base API must be reachable at the configured internal addresses.
