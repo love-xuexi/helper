@@ -47,6 +47,34 @@ class ChatSessionMetadata:
             answer=answer,
         )
 
+    @classmethod
+    def from_agent_session(
+        cls,
+        session_id: str,
+        task: str,
+        flow_json: str,
+        report: str,
+        user_id: str = "",
+    ) -> ChatSessionMetadata:
+        """Agent 模式的元数据构造。
+
+        与 from_message 的区别：
+        - title 从 task 截取（与普通问答一致）
+        - last_message_preview 从 report 截取（而非 flow_json，避免 JSON 出现在预览中）
+        - answer 存的是 flow_json（结构化 JSON），前端解析后渲染执行流程
+        """
+        title = task[:30] + ("..." if len(task) > 30 else "")
+        preview = report[:80] + ("..." if len(report) > 80 else "")
+        return cls(
+            session_id=session_id,
+            title=title or "Agent 任务",
+            last_message_preview=preview,
+            message_count=2,
+            user_id=user_id,
+            question=task,
+            answer=flow_json,
+        )
+
 
 class InMemorySessionStore:
     """内存会话元数据存储（memory 后端使用）。
@@ -552,6 +580,50 @@ class SessionPersistenceManager:
     ) -> None:
         metadata = ChatSessionMetadata.from_message(
             session_id=session_id, question=question, answer=answer, user_id=user_id
+        )
+        if self.sqlite_store is not None:
+            self.sqlite_store.upsert_session(metadata)
+            return
+        if self.session_store is not None:
+            self.session_store.upsert_session(metadata)
+            return
+        if self.in_memory_store is not None:
+            self.in_memory_store.upsert_session(metadata)
+
+    def upsert_agent_session(
+        self,
+        session_id: str,
+        task: str,
+        plan: list[str],
+        steps: list[dict[str, str]],
+        report: str,
+        user_id: str = "",
+    ) -> None:
+        """持久化 Agent 模式（AIOps Plan-Execute-Replan）的完整执行记录。
+
+        存储格式：
+        - chat_sessions 表：title=task[:30]，preview=report[:80]（与 Chat 模式一致）
+        - chat_messages 表：
+          - role='user'，content=task
+          - role='assistant'，content=JSON({"type":"agent","plan":[...],"steps":[...],"report":"..."})
+
+        前端加载历史时检测 assistant content 是否为 agent JSON，是则渲染执行流程可视化，否则按普通文本处理。
+        """
+        import json
+
+        flow_data = {
+            "type": "agent",
+            "plan": plan,
+            "steps": steps,
+            "report": report,
+        }
+        flow_json = json.dumps(flow_data, ensure_ascii=False)
+        metadata = ChatSessionMetadata.from_agent_session(
+            session_id=session_id,
+            task=task,
+            flow_json=flow_json,
+            report=report,
+            user_id=user_id,
         )
         if self.sqlite_store is not None:
             self.sqlite_store.upsert_session(metadata)

@@ -661,11 +661,34 @@ class SmartQAApp {
                 if (response.ok) {
                     const data = await response.json();
                     const backendHistory = data.history || [];
-                    messagesToLoad = backendHistory.map(msg => ({
-                        type: msg.role === 'user' ? 'user' : 'assistant',
-                        content: msg.content,
-                        timestamp: msg.timestamp,
-                    }));
+                    messagesToLoad = backendHistory.map(msg => {
+                        // 检测 Agent 模式消息（assistant content 为 JSON）
+                        if (
+                            msg.role === 'assistant' &&
+                            msg.content &&
+                            msg.content.trim().startsWith('{')
+                        ) {
+                            try {
+                                const parsed = JSON.parse(msg.content);
+                                if (parsed && parsed.type === 'agent') {
+                                    return {
+                                        type: 'assistant',
+                                        content: '',
+                                        isAgent: true,
+                                        agentData: parsed,
+                                        timestamp: msg.timestamp,
+                                    };
+                                }
+                            } catch (e) {
+                                // 非 JSON，降级为普通文本
+                            }
+                        }
+                        return {
+                            type: msg.role === 'user' ? 'user' : 'assistant',
+                            content: msg.content,
+                            timestamp: msg.timestamp,
+                        };
+                    });
                 }
             } catch (error) {
                 console.error('加载会话历史失败:', error);
@@ -683,13 +706,19 @@ class SmartQAApp {
                 timestamp: msg.timestamp || new Date().toISOString(),
                 messageId: msg.messageId,
                 citations: msg.citations,
+                isAgent: msg.isAgent,
+                agentData: msg.agentData,
             }));
             messagesToLoad.forEach(msg => {
-                const options = msg.type === 'assistant' ? {
-                    messageId: msg.messageId,
-                    citations: msg.citations,
-                } : {};
-                this.addMessage(msg.type, msg.content, false, false, options);
+                if (msg.isAgent) {
+                    this.addAgentMessageFromHistory(msg.agentData, msg.timestamp);
+                } else {
+                    const options = msg.type === 'assistant' ? {
+                        messageId: msg.messageId,
+                        citations: msg.citations,
+                    } : {};
+                    this.addMessage(msg.type, msg.content, false, false, options);
+                }
             });
         }
         this.checkAndSetCentered();
@@ -880,6 +909,115 @@ class SmartQAApp {
         } catch (error) {
             console.error('Agent 模式发送失败:', error);
             this.addMessage('assistant', '抱歉，Agent 执行时出现错误：' + error.message);
+        }
+    }
+
+    /**
+     * 从历史记录还原 Agent 执行流程（加载会话时调用）
+     * @param agentData - {type:"agent", plan:[...], steps:[{step,result}], report:"..."}
+     */
+    addAgentMessageFromHistory(agentData, timestamp) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message assistant';
+
+        const messageAvatar = document.createElement('div');
+        messageAvatar.className = 'message-avatar';
+        messageAvatar.innerHTML = `
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" fill="white"/>
+            </svg>
+        `;
+        messageDiv.appendChild(messageAvatar);
+
+        const messageContentWrapper = document.createElement('div');
+        messageContentWrapper.className = 'message-content-wrapper';
+
+        // 构建流程容器（不包含任务块，因为用户消息已在上方显示）
+        const flowContainer = document.createElement('div');
+        flowContainer.className = 'agent-flow';
+
+        const flowWrapper = document.createElement('div');
+        flowWrapper.className = 'agent-flow-wrapper collapsed';  // 历史消息默认折叠
+        const flowHeader = document.createElement('div');
+        flowHeader.className = 'agent-flow-header';
+        const planCount = (agentData.plan || []).length;
+        const stepCount = (agentData.steps || []).length;
+        flowHeader.innerHTML = `
+            <svg class="agent-flow-chevron" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="agent-flow-title">Agent 执行流程</span>
+            <span class="agent-flow-status">已完成（${stepCount}/${planCount} 步）</span>
+        `;
+
+        const flowBody = document.createElement('div');
+        flowBody.className = 'agent-flow-body';
+
+        // 计划区域
+        if (planCount > 0) {
+            const planDiv = document.createElement('div');
+            planDiv.className = 'agent-plan';
+            planDiv.innerHTML = `
+                <div class="agent-section-header"><span>📋 执行计划（${planCount} 步，完成 ${stepCount}）</span></div>
+                <div class="agent-plan-list">
+                    ${agentData.plan.map((step, i) => {
+                        const isDone = i < stepCount;
+                        const cls = isDone ? 'done' : 'skipped';
+                        return `<div class="agent-plan-item ${cls}"><span class="plan-num">${i + 1}</span><span class="plan-text">${this.escapeHtml(step)}</span></div>`;
+                    }).join('')}
+                </div>
+            `;
+            flowBody.appendChild(planDiv);
+        }
+
+        // 步骤执行区域
+        if (stepCount > 0) {
+            const stepsDiv = document.createElement('div');
+            stepsDiv.className = 'agent-steps';
+            agentData.steps.forEach((s, i) => {
+                const stepDiv = document.createElement('div');
+                stepDiv.className = 'agent-step done';
+                const hasResult = s.result && s.result.trim();
+                stepDiv.innerHTML = `
+                    <div class="agent-step-header">
+                        <span class="agent-step-icon">✅</span>
+                        <span class="agent-step-title">步骤 ${i + 1}</span>
+                        <span class="agent-step-detail">${this.escapeHtml(s.step || '')}</span>
+                    </div>
+                    ${hasResult ? `<div class="agent-step-result">${this.escapeHtml(s.result)}</div>` : ''}
+                `;
+                stepsDiv.appendChild(stepDiv);
+            });
+            flowBody.appendChild(stepsDiv);
+        }
+
+        flowWrapper.appendChild(flowHeader);
+        flowWrapper.appendChild(flowBody);
+        flowContainer.appendChild(flowWrapper);
+
+        // 最终报告
+        if (agentData.report) {
+            const reportDiv = document.createElement('div');
+            reportDiv.className = 'agent-report';
+            reportDiv.innerHTML = `
+                <div class="agent-report-header">📄 最终报告</div>
+                <div class="agent-report-body markdown-body">${this.renderMarkdown(agentData.report)}</div>
+            `;
+            this.highlightCodeBlocks(reportDiv);
+            flowContainer.appendChild(reportDiv);
+        }
+
+        messageContentWrapper.appendChild(flowContainer);
+        messageDiv.appendChild(messageContentWrapper);
+
+        // 绑定折叠
+        flowHeader.addEventListener('click', () => {
+            flowWrapper.classList.toggle('collapsed');
+        });
+
+        if (this.chatMessages) {
+            this.chatMessages.appendChild(messageDiv);
+            this.checkAndSetCentered();
         }
     }
 
@@ -1074,6 +1212,27 @@ class SmartQAApp {
         if (flowWrapper && !flowState.error) {
             // 成功时自动折叠，让用户聚焦报告；失败时保持展开方便排查
             flowWrapper.classList.add('collapsed');
+        }
+
+        // 保存到 currentChatHistory（localStorage 镜像）
+        // Agent 消息以 JSON 存储完整流程，加载历史时还原执行流程可视化
+        if (flowState.report || flowState.error) {
+            const agentData = {
+                type: 'agent',
+                plan: flowState.plan,
+                steps: flowState.completedSteps.map(s => ({
+                    step: s.step,
+                    result: s.resultPreview,
+                })),
+                report: flowState.report || '',
+            };
+            this.currentChatHistory.push({
+                type: 'assistant',
+                content: JSON.stringify(agentData),
+                isAgent: true,
+                agentData: agentData,
+                timestamp: new Date().toISOString(),
+            });
         }
 
         this.scrollToBottom();

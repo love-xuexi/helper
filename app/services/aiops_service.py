@@ -192,10 +192,33 @@ class AIOpsService:
             # 图执行完以后，从 checkpointer 中读取最终 state，拿到完整 response。
             final_state = self.graph.get_state(config_dict)
             final_response = ""
+            final_plan: list[str] = []
+            final_past_steps: list[tuple] = []
 
             # 安全地获取响应（处理 values 可能为 None 的情况）
             if final_state and final_state.values:
                 final_response = final_state.values.get("response", "")
+                final_plan = final_state.values.get("plan", [])
+                final_past_steps = final_state.values.get("past_steps", [])
+
+            # 持久化到 SQLite（chat_sessions + chat_messages）
+            # Agent 模式的 assistant 消息以 JSON 存储 plan/steps/report，前端加载历史时还原执行流程。
+            try:
+                steps_data = [
+                    {"step": str(s), "result": str(r)}
+                    for s, r in final_past_steps
+                    if isinstance(s, str) or isinstance(r, str)
+                ]
+                session_persistence_manager.upsert_agent_session(
+                    session_id=session_id,
+                    task=user_input,
+                    plan=final_plan,
+                    steps=steps_data,
+                    report=final_response,
+                )
+                logger.info(f"[会话 {session_id}] Agent 任务已持久化（{len(steps_data)} 步）")
+            except Exception as persist_err:
+                logger.error(f"[会话 {session_id}] Agent 任务持久化失败: {persist_err}")
 
             # 发送完成事件
             # complete 是 execute(...) 的最后一个事件，用于告诉前端整个任务已经结束。

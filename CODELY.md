@@ -5,15 +5,18 @@
 ### User
 
 ### Feedback
-- [2026-08-06 10:43:23] [feedback] 前端静态文件改动后必须 bump `index.html` 中的 `?v=N` 缓存版本号（当前 v=10），否则浏览器加载旧缓存。**Why:** 项目无构建工具，靠手动版本号刷新缓存。**How to apply:** 每次改 app.js 或 styles.css 后，同步更新 index.html 中两处 `?v=` 引用。
+- [2026-08-06 11:27:22] [feedback] 前端静态文件改动后必须 bump `index.html` 中的 `?v=N` 缓存版本号（当前 v=12），否则浏览器加载旧缓存。**Why:** 项目无构建工具，靠手动版本号刷新缓存。**How to apply:** 每次改 app.js 或 styles.css 后，同步更新 index.html 中两处 `?v=` 引用。
+
 
 
 ### Project
 - [2026-08-05 17:52:59] [project] AIOps Agent 模式已接入前端（2026-08-05 完成）。输入框有 Chat/Agent 模式切换按钮，Agent 模式走 `POST /api/aiops`（支持 `task` 自定义任务），前端展示 Plan-Execute-Replan 执行流程（计划列表+步骤卡片+最终报告）。MCP 服务仍用 mock 数据，需手动启动 `python mcp_servers/cls_server.py` 和 `monitor_server.py`。
 
 - [2026-08-05 17:34:42] [project] ruff 未全局安装，需通过 `uv run python -m ruff` 调用（直接 `ruff` 会报 command not found）。格式化命令：`uv run python -m ruff format app/ mcp_servers/ tests/` + `uv run python -m ruff check --fix app/ mcp_servers/ tests/`。
-- [2026-08-05 18:18:36] fastmcp 存在打包 bug（2.12.0–2.14.7、3.4.x 均已确认有 bug）。当前 .venv 中是 `fastmcp==2.12.0` + 3 处手动补丁（见下方），服务可正常运行。**补丁位置：** ①`server/auth/auth.py` 加 `PrivateKeyJWTClientAuthenticator`/`TokenHandler` stub 类；②`server/auth/__init__.py` 的 `oauth_proxy` 导入包 try/except；③`fastmcp/__init__.py` 的 `client` 导入包 try/except。**How to apply:** venv 重建（如 stop/start-windows.bat）后补丁丢失，需重打；或换 `mcp` SDK 原生写法重写 cls_server/monitor_server。
+- [2026-08-06 11:38:33] MCP 服务已从第三方 `fastmcp` 包（打包 bug 严重，2.12.0–2.14.7 和 3.4.x 全系列均有 ImportError）切换到底层 `mcp` SDK（v1.26.0）自带的 `FastMCP`。**改动：** `cls_server.py` 和 `monitor_server.py` 各 2 处——① `from fastmcp import FastMCP` → `from mcp.server.fastmcp import FastMCP`；② `mcp.run(transport=..., host=..., port=..., path="/mcp")` → `uvicorn.run(mcp.streamable_http_app(), host=..., port=...)`（`mcp` SDK 的 `run()` 不支持 host/port/path，需用 `streamable_http_app()` 返回 Starlette app 交给 uvicorn）。默认 mount path 仍是 `/mcp`。**Why:** `mcp` SDK 是 `fastmcp` 包的底层依赖，API 完全兼容且无打包 bug，venv 重建也不受影响。
+
 - [2026-08-06 10:43:23] [project] Agent 模式（AIOps）流式光标 Bug：`.message.streaming` 类触发 CSS `::after` 闪烁光标，Agent 流程的 `finalizeAgentFlow` 必须移除 `streaming` 类才能停止光标。Chat 模式的 `handleStreamComplete` 已处理。
+- [2026-08-06 11:27:23] [project] Agent 模式持久化方案：后端 `aiops_service.execute()` 完成后调 `session_persistence_manager.upsert_agent_session(task, plan, steps, report)`，存入 `chat_sessions`+`chat_messages` 表。assistant 消息以 JSON `{"type":"agent","plan":[...],"steps":[{step,result}],"report":"..."}` 存储。前端加载历史时 `JSON.parse` 后按 `type==='agent'` 识别，调 `addAgentMessageFromHistory` 还原执行流程。**注意：** JSON 检测不能用 `startsWith('{"type":"agent"')`，因为 `json.dumps` 默认冒号后有空格，必须用 `JSON.parse` + 字段判断。
 
 ### Reference
 

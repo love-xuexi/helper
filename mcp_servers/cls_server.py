@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any
 
-from fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP
 
 # 配置日志
 logging.basicConfig(
@@ -461,4 +461,6 @@ def search_log(
 
 
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http", host="127.0.0.1", port=8003, path="/mcp")
+    import uvicorn
+
+    uvicorn.run(mcp.streamable_http_app(), host="127.0.0.1", port=8003)

@@ -16,7 +16,7 @@ import random
 from datetime import datetime, timedelta
 from typing import Any
 
-from fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP
 
 # 配置日志
 logging.basicConfig(
@@ -441,5 +441,7 @@ def query_memory_metrics(
 
 
 if __name__ == "__main__":
+    import uvicorn
+
     # 使用 streamable-http 模式，运行在 8004 端口
-    mcp.run(transport="streamable-http", host="127.0.0.1", port=8004, path="/mcp")
+    uvicorn.run(mcp.streamable_http_app(), host="127.0.0.1", port=8004)
