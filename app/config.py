@@ -124,6 +124,10 @@ class Settings(BaseSettings):
     mcp_cls_url: str = "http://localhost:8003/mcp"
     mcp_monitor_transport: str = "streamable-http"
     mcp_monitor_url: str = "http://localhost:8004/mcp"
+    mcp_alert_transport: str = "streamable-http"
+    mcp_alert_url: str = "http://localhost:8005/mcp"
+    mcp_ops_transport: str = "streamable-http"
+    mcp_ops_url: str = "http://localhost:8006/mcp"
 
     @property
     def is_postgres_checkpoint_enabled(self) -> bool:
@@ -152,6 +156,14 @@ class Settings(BaseSettings):
             "monitor": {
                 "transport": self.mcp_monitor_transport,
                 "url": self.mcp_monitor_url,
+            },
+            "alert": {
+                "transport": self.mcp_alert_transport,
+                "url": self.mcp_alert_url,
+            },
+            "ops": {
+                "transport": self.mcp_ops_transport,
+                "url": self.mcp_ops_url,
             },
         }
 

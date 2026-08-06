@@ -10,7 +10,8 @@
 
 
 ### Project
-- [2026-08-05 17:52:59] [project] AIOps Agent 模式已接入前端（2026-08-05 完成）。输入框有 Chat/Agent 模式切换按钮，Agent 模式走 `POST /api/aiops`（支持 `task` 自定义任务），前端展示 Plan-Execute-Replan 执行流程（计划列表+步骤卡片+最终报告）。MCP 服务仍用 mock 数据，需手动启动 `python mcp_servers/cls_server.py` 和 `monitor_server.py`。
+- [2026-08-06 12:05:02] [project] AIOps MCP 工具已大幅扩展（2026-08-06 完成）。现有 4 个 MCP Server 共 ~39 个工具：CLS(8003, 10个日志工具)、Monitor(8004, 16个监控/服务工具)、Alert(8005, 6个告警工具)、Ops(8006, 7个部署/工单/运维操作工具)。共享数据在 `mcp_servers/mock_data.py`，覆盖 7 个服务 + 5 条活跃告警(对应 aiops-docs 的 5 个场景) + 10 条历史工单 + 8 条部署记录 + 慢SQL + 系统事件 + Runbook。`start-windows.bat` 自动启动全部 4 个 MCP Server。Windows 下运行方式：`python -m mcp_servers.cls_server`（模块模式，非脚本模式，否则 `from mcp_servers.mock_data import` 会失败）。
+
 
 - [2026-08-05 17:34:42] [project] ruff 未全局安装，需通过 `uv run python -m ruff` 调用（直接 `ruff` 会报 command not found）。格式化命令：`uv run python -m ruff format app/ mcp_servers/ tests/` + `uv run python -m ruff check --fix app/ mcp_servers/ tests/`。
 - [2026-08-06 11:38:33] MCP 服务已从第三方 `fastmcp` 包（打包 bug 严重，2.12.0–2.14.7 和 3.4.x 全系列均有 ImportError）切换到底层 `mcp` SDK（v1.26.0）自带的 `FastMCP`。**改动：** `cls_server.py` 和 `monitor_server.py` 各 2 处——① `from fastmcp import FastMCP` → `from mcp.server.fastmcp import FastMCP`；② `mcp.run(transport=..., host=..., port=..., path="/mcp")` → `uvicorn.run(mcp.streamable_http_app(), host=..., port=...)`（`mcp` SDK 的 `run()` 不支持 host/port/path，需用 `streamable_http_app()` 返回 Starlette app 交给 uvicorn）。默认 mount path 仍是 `/mcp`。**Why:** `mcp` SDK 是 `fastmcp` 包的底层依赖，API 完全兼容且无打包 bug，venv 重建也不受影响。

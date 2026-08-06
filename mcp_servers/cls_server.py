@@ -1,6 +1,14 @@
 """腾讯云 CLS (Cloud Log Service) MCP Server
 
-本地实现的 CLS 日志服务 MCP Server，提供日志查询、检索和分析功能。
+提供日志查询、检索和分析功能，包括：
+- 日志主题查询（按服务名/主题名）
+- 日志搜索（按 topic_id / 服务名）
+- 日志模式分析（错误频率、异常聚类）
+- 慢 SQL 查询
+- 系统事件查询（OOM / restart / crash）
+- 日志级别统计
+
+所有日志数据来自 mock_data.py，与告警场景形成证据链。
 """
 
 import functools
@@ -11,7 +19,18 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-# 配置日志
+from mcp_servers.mock_data import (
+    MOCK_LOG_TOPICS,
+    MOCK_SLOW_SQLS,
+    MOCK_SYSTEM_EVENTS,
+    get_logs_by_service,
+    get_service_by_name,
+    get_slow_sqls_by_service,
+    get_system_events_by_service,
+    minutes_ago,
+    now,
+)
+
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
@@ -21,195 +40,104 @@ mcp = FastMCP("CLS")
 
 
 def log_tool_call(func):
-    """装饰器：记录工具调用的日志，包括方法名、参数和返回状态"""
+    """装饰器：记录工具调用日志"""
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         method_name = func.__name__
-
-        # 记录调用信息
-        logger.info("=" * 80)
         logger.info(f"调用方法: {method_name}")
-
-        # 记录参数（排除self等）
         if kwargs:
-            # 使用 json.dumps 格式化参数，处理可能的序列化错误
             try:
                 params_str = json.dumps(kwargs, ensure_ascii=False, indent=2)
             except (TypeError, ValueError):
                 params_str = str(kwargs)
-            logger.info(f"参数信息:\n{params_str}")
-        else:
-            logger.info("参数信息: 无")
-
-        # 执行方法
+            logger.info(f"参数: {params_str}")
         try:
             result = func(*args, **kwargs)
-
-            # 记录返回状态
-            logger.info("返回状态: SUCCESS")
-
-            # 记录返回结果摘要（避免日志过长）
-            if isinstance(result, dict):
-                summary = {
-                    k: v
-                    if not isinstance(v, (list, dict))
-                    else f"<{type(v).__name__} with {len(v)} items>"
-                    for k, v in list(result.items())[:5]
-                }
-                logger.info(f"返回结果摘要: {json.dumps(summary, ensure_ascii=False)}")
-            else:
-                logger.info(f"返回结果: {result}")
-
-            logger.info("=" * 80)
+            logger.info(f"方法 {method_name} 执行成功")
             return result
-
         except Exception as e:
-            # 记录错误状态
-            logger.error("返回状态: ERROR")
-            logger.error(f"错误信息: {str(e)}")
-            logger.error("=" * 80)
+            logger.error(f"方法 {method_name} 执行失败: {e}")
             raise
 
     return wrapper
 
 
-def parse_time_or_default(time_str: str | None, default_offset_hours: int = 0) -> datetime:
-    """解析时间字符串或返回默认时间。
-
-    Args:
-        time_str: 时间字符串（格式：YYYY-MM-DD HH:MM:SS）
-        default_offset_hours: 默认时间偏移（小时）
-
-    Returns:
-        datetime: 解析后的时间对象
-    """
+def _parse_time(time_str: str | None, default_offset_hours: int = 0) -> datetime:
+    """解析时间字符串或返回默认时间"""
     if time_str:
         try:
             return datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
         except ValueError:
             pass
-    return datetime.now() + timedelta(hours=default_offset_hours)
+    return now() + timedelta(hours=default_offset_hours)
 
 
-def generate_time_series(base_time: datetime, minutes_offset: int) -> str:
-    """生成基于基准时间的时间字符串。
-
-    Args:
-        base_time: 基准时间
-        minutes_offset: 分钟偏移量
-
-    Returns:
-        str: 格式化的时间字符串
-    """
-    result_time = base_time + timedelta(minutes=minutes_offset)
-    return result_time.strftime("%Y-%m-%d %H:%M:%S")
+# ============================================================
+# 基础工具
+# ============================================================
 
 
 @mcp.tool()
 @log_tool_call
 def get_current_timestamp() -> int:
-    """获取当前时间戳（以毫秒为单位）。
+    """获取当前时间戳（毫秒）。
 
-    此工具用于获取标准的毫秒时间戳，可用于：
-    1. 作为 search_log 的 end_time 参数（查询到现在）
-    2. 计算历史时间点作为 start_time 参数
+    用于 search_log 的 start_time / end_time 参数。
+    计算 N 分钟前时间戳：current - (N * 60 * 1000)。
 
     Returns:
-        int: 当前时间戳（毫秒），例如: 1708012345000
-
-    使用示例:
-        # 获取当前时间
-        current = get_current_timestamp()
-
-        # 计算15分钟前的时间
-        fifteen_min_ago = current - (15 * 60 * 1000)
-
-        # 计算1小时前的时间
-        one_hour_ago = current - (60 * 60 * 1000)
-
-        # 用于搜索最近15分钟的日志
-        search_log(
-            topic_id="topic-001",
-            start_time=fifteen_min_ago,
-            end_time=current
-        )
+        当前毫秒时间戳，例如: 1708012345000
     """
-    return int(datetime.now().timestamp() * 1000)
+    return int(now().timestamp() * 1000)
 
 
 @mcp.tool()
 @log_tool_call
 def get_region_code_by_name(region_name: str) -> dict[str, Any]:
-    """根据地区名称搜索对应的地区参数。
+    """根据地区名称获取地区代码。
 
     Args:
-        region_name: 地区名称（如：北京、上海、广州等）
+        region_name: 地区名称（北京/上海/广州）
 
     Returns:
-        Dict: 包含地区代码和相关信息的字典
-            - region_code: 地区代码
-            - region_name: 地区名称
-            - available: 是否可用
+        地区代码及可用性信息。
     """
-    # 模拟地区映射表（实际应该从配置或数据库读取）
     region_mapping = {
         "北京": {"region_code": "ap-beijing", "region_name": "北京", "available": True},
         "上海": {"region_code": "ap-shanghai", "region_name": "上海", "available": True},
         "广州": {"region_code": "ap-guangzhou", "region_name": "广州", "available": True},
     }
-
-    result = region_mapping.get(region_name)
-    if result:
-        return result
-    else:
-        return {
+    return region_mapping.get(
+        region_name,
+        {
             "region_code": None,
             "region_name": region_name,
             "available": False,
             "error": f"未找到地区: {region_name}",
-        }
+        },
+    )
 
 
 @mcp.tool()
 @log_tool_call
 def get_topic_info_by_name(topic_name: str, region_code: str | None = None) -> dict[str, Any]:
-    """根据主题名称搜索相关的主题信息。
+    """根据主题名称搜索日志主题信息。
 
     Args:
         topic_name: 主题名称
         region_code: 地区代码（可选）
 
     Returns:
-        Dict: 包含主题信息的字典
-            - topic_id: 主题ID
-            - topic_name: 主题名称
-            - region_code: 所属地区
-            - create_time: 创建时间
-            - log_count: 日志数量
+        主题ID、名称、所属地区、日志类型。
     """
-    mock_topics = [
-        {
-            "topic_id": "topic-001",
-            "topic_name": "数据同步服务日志",
-            "service_name": "data-sync-service",
-            "region_code": "ap-beijing",
-            "create_time": "2024-01-01 10:00:00",
-            "log_count": 0,
-            "description": "服务应用日志",
-        }
-    ]
-
-    # 根据名称和地区筛选
-    for topic in mock_topics:
+    for topic in MOCK_LOG_TOPICS:
         if topic["topic_name"] == topic_name:
-            if region_code is None or topic["region_code"] == region_code:
+            if region_code is None or topic["region_code"] in (region_code, "all"):
                 return topic
-
     return {
         "topic_id": None,
         "topic_name": topic_name,
-        "region_code": region_code,
         "error": f"未找到主题: {topic_name}",
     }
 
@@ -219,129 +147,36 @@ def get_topic_info_by_name(topic_name: str, region_code: str | None = None) -> d
 def search_topic_by_service_name(
     service_name: str, region_code: str | None = None, fuzzy: bool = True
 ) -> dict[str, Any]:
-    """根据服务名称搜索相关的日志主题信息，支持模糊搜索。
-
-    此工具用于根据服务名称查找对应的日志主题（topic），便于后续进行日志查询。
+    """根据服务名称搜索相关的日志主题。
 
     Args:
-        service_name: 服务名称（必填）
-            示例: "data-sync-service", "sync", "data-sync"
-            说明: 当 fuzzy=True 时，支持部分匹配
-
+        service_name: 服务名称（如 "payment-service"）
         region_code: 地区代码（可选）
-            示例: "ap-beijing", "ap-shanghai"
-            说明: 如果指定，只返回该地区的主题
-
-        fuzzy: 是否启用模糊搜索（可选，默认 True）
-            True: 部分匹配，例如 "sync" 可以匹配 "data-sync-service"
-            False: 精确匹配，必须完全一致
+        fuzzy: 是否模糊搜索（默认 True）
 
     Returns:
-        Dict: 搜索结果
-            - total: 匹配到的主题数量
-            - topics: 主题列表，每个主题包含:
-                * topic_id: 主题ID（用于后续日志查询）
-                * topic_name: 主题名称
-                * service_name: 服务名称
-                * region_code: 所属地区
-                * create_time: 创建时间
-                * log_count: 日志数量
-                * description: 主题描述
-            - query: 查询条件
-
-    使用示例:
-        # 示例1: 模糊搜索（推荐）
-        search_topic_by_service_name(service_name="data-sync")
-        # 可以匹配: "data-sync-service", "data-sync-worker" 等
-
-        # 示例2: 精确搜索
-        search_topic_by_service_name(
-            service_name="data-sync-service",
-            fuzzy=False
-        )
-
-        # 示例3: 指定地区搜索
-        search_topic_by_service_name(
-            service_name="sync",
-            region_code="ap-beijing"
-        )
-
-        # 示例4: 查找后进行日志搜索的完整流程
-        # 步骤1: 根据服务名查找 topic
-        result = search_topic_by_service_name(service_name="data-sync-service")
-
-        # 步骤2: 获取 topic_id
-        topic_id = result["topics"][0]["topic_id"]  # "topic-001"
-
-        # 步骤3: 使用 topic_id 查询日志
-        current_ts = get_current_timestamp()
-        start_ts = current_ts - (15 * 60 * 1000)
-        search_log(
-            topic_id=topic_id,
-            start_time=start_ts,
-            end_time=current_ts
-        )
+        匹配的日志主题列表。
     """
-    # Mock 主题数据（实际应该从配置或数据库读取）
-    mock_topics = [
-        {
-            "topic_id": "topic-001",
-            "topic_name": "数据同步服务日志",
-            "service_name": "data-sync-service",
-            "region_code": "ap-beijing",
-            "create_time": "2024-01-01 10:00:00",
-            "log_count": 0,
-            "description": "数据同步服务的应用日志，包含同步任务执行情况",
-        },
-        {
-            "topic_id": "topic-002",
-            "topic_name": "数据同步服务错误日志",
-            "service_name": "data-sync-service",
-            "region_code": "ap-beijing",
-            "create_time": "2024-01-01 10:00:00",
-            "log_count": 0,
-            "description": "数据同步服务的错误日志",
-        },
-        {
-            "topic_id": "topic-003",
-            "topic_name": "API网关服务日志",
-            "service_name": "api-gateway-service",
-            "region_code": "ap-shanghai",
-            "create_time": "2024-01-01 10:00:00",
-            "log_count": 0,
-            "description": "API网关服务日志",
-        },
-    ]
-
-    matched_topics = []
-
-    # 搜索逻辑
-    for topic in mock_topics:
-        # 地区筛选
-        if region_code and topic["region_code"] != region_code:
+    matched = []
+    for topic in MOCK_LOG_TOPICS:
+        svc = topic.get("service_name")
+        if svc is None:
             continue
-
-        # 服务名称匹配
-        topic_service_name = topic.get("service_name", "")
-
+        if region_code and topic["region_code"] not in (region_code, "all"):
+            continue
         if fuzzy:
-            # 模糊匹配：服务名包含查询字符串，或查询字符串包含服务名
-            if (
-                service_name.lower() in topic_service_name.lower()
-                or topic_service_name.lower() in service_name.lower()
-            ):
-                matched_topics.append(topic)
+            if service_name.lower() in svc.lower() or svc.lower() in service_name.lower():
+                matched.append(topic)
         else:
-            # 精确匹配
-            if topic_service_name == service_name:
-                matched_topics.append(topic)
+            if svc == service_name:
+                matched.append(topic)
 
     return {
-        "total": len(matched_topics),
-        "topics": matched_topics,
+        "total": len(matched),
+        "topics": matched,
         "query": {"service_name": service_name, "region_code": region_code, "fuzzy": fuzzy},
-        "message": f"找到 {len(matched_topics)} 个匹配的日志主题"
-        if matched_topics
+        "message": f"找到 {len(matched)} 个匹配的日志主题"
+        if matched
         else f"未找到服务 '{service_name}' 的日志主题",
     }
 
@@ -351,113 +186,379 @@ def search_topic_by_service_name(
 def search_log(
     topic_id: str, start_time: int, end_time: int, query: str | None = None, limit: int = 100
 ) -> dict[str, Any]:
-    """基于提供的查询参数搜索日志。
+    """基于 topic_id 搜索日志。
 
     Args:
-        topic_id: 主题ID（必填）
-            示例: "topic-001"
-
-        start_time: 开始时间戳，单位为毫秒（必填，int类型）
-            重要: 必须传递整数类型的毫秒时间戳
-            获取方式:
-            1. 使用 get_current_timestamp() 工具获取当前时间戳
-            2. 计算历史时间: current_timestamp - (分钟数 * 60 * 1000)
-            示例:
-            - 当前时间: 1708012345000
-            - 15分钟前: 1708012345000 - (15 * 60 * 1000) = 1708011445000
-            - 1小时前: 1708012345000 - (60 * 60 * 1000) = 1708008745000
-
-        end_time: 结束时间戳，单位为毫秒（必填，int类型）
-            重要: 必须传递整数类型的毫秒时间戳
-            通常使用 get_current_timestamp() 工具获取当前时间作为结束时间
-            示例: 1708012345000
-
-        query: 查询语句（可选，CLS 查询语法）
-            示例: "level:ERROR" 或 "message:异常"
-
-        limit: 返回结果数量限制（默认100，可选）
+        topic_id: 主题ID（如 "topic-001"）
+        start_time: 开始时间戳（毫秒）
+        end_time: 结束时间戳（毫秒）
+        query: 查询语句（可选，如 "level:ERROR"）
+        limit: 返回条数限制（默认100）
 
     Returns:
-        Dict: 搜索结果
-            - topic_id: 主题ID
-            - start_time: 开始时间戳
-            - end_time: 结束时间戳
-            - query: 查询语句
-            - limit: 结果限制
-            - total: 实际返回的日志条数
-            - logs: 日志列表，每条日志包含:
-                * timestamp: 日志时间（格式: YYYY-MM-DD HH:MM:SS）
-                * level: 日志级别
-                * message: 日志内容
-            - took_ms: 查询耗时（毫秒）
-            - message: 查询状态消息
-
-    使用示例:
-        # 步骤1: 获取当前时间戳
-        current_ts = get_current_timestamp()  # 返回: 1708012345000
-
-        # 步骤2: 计算开始时间（15分钟前）
-        start_ts = current_ts - (15 * 60 * 1000)  # 1708011445000
-
-        # 步骤3: 搜索日志
-        search_log(
-            topic_id="topic-001",
-            start_time=start_ts,     # int类型: 1708011445000
-            end_time=current_ts,     # int类型: 1708012345000
-            limit=100
-        )
+        日志列表，每条包含 timestamp、level、message。
+        根据 topic_id 返回与告警场景相关的日志内容。
     """
-    # 根据 topic_id 返回不同的结果
-    if topic_id == "topic-001":
-        # topic-001: 应用日志，动态生成 INFO 日志
-        logs = []
-        current_time_ms = start_time
-        count = 0
+    # 查找 topic 对应的服务
+    topic = None
+    for t in MOCK_LOG_TOPICS:
+        if t["topic_id"] == topic_id:
+            topic = t
+            break
 
-        # 计算最大可生成的日志条数（基于时间范围）
-        max_logs_by_time = int((end_time - start_time) / (60 * 1000)) + 1
-
-        # 实际生成的日志数量取 limit 和时间范围内最大日志数的较小值
-        actual_limit = min(limit, max_logs_by_time)
-
-        while current_time_ms <= end_time and count < actual_limit:
-            # 将毫秒时间戳转换为可读格式
-            log_time = datetime.fromtimestamp(current_time_ms / 1000)
-            time_str = log_time.strftime("%Y-%m-%d %H:%M:%S")
-
-            log_entry = {"timestamp": time_str, "level": "INFO", "message": "正在同步元数据……"}
-
-            logs.append(log_entry)
-            count += 1
-
-            # 下一条日志时间增加1分钟（60秒 * 1000毫秒）
-            current_time_ms += 60 * 1000
-
+    if not topic:
         return {
             "topic_id": topic_id,
+            "total": 0,
+            "logs": [],
+            "error": f"主题不存在: {topic_id}",
+        }
+
+    # 系统级主题
+    if topic["topic_name"] == "system-metrics":
+        return {
+            "topic_id": topic_id,
+            "total": 3,
+            "logs": [
+                {
+                    "timestamp": minutes_ago(28),
+                    "level": "WARN",
+                    "message": "payment-service CPU 使用率 95.2%，超过阈值 80%",
+                },
+                {
+                    "timestamp": minutes_ago(42),
+                    "level": "WARN",
+                    "message": "data-sync-service 内存使用率 88.4%，超过阈值 85%",
+                },
+                {
+                    "timestamp": minutes_ago(55),
+                    "level": "WARN",
+                    "message": "api-gateway 磁盘使用率 87.3%",
+                },
+            ],
+            "took_ms": 45,
+        }
+
+    if topic["topic_name"] == "system-events":
+        return {
+            "topic_id": topic_id,
+            "total": len(MOCK_SYSTEM_EVENTS),
+            "logs": [
+                {
+                    "timestamp": e["timestamp"],
+                    "level": e["severity"].upper(),
+                    "message": e["message"],
+                }
+                for e in MOCK_SYSTEM_EVENTS
+            ],
+            "took_ms": 50,
+        }
+
+    if topic["topic_name"] == "database-slow-query":
+        return {
+            "topic_id": topic_id,
+            "total": len(MOCK_SLOW_SQLS),
+            "logs": [
+                {
+                    "timestamp": s["timestamp"],
+                    "level": "WARN",
+                    "message": f"慢SQL: {s['query'][:80]}... 耗时 {s['execution_time_ms']}ms",
+                }
+                for s in MOCK_SLOW_SQLS
+            ],
+            "took_ms": 40,
+        }
+
+    # 服务级主题：返回该服务的 mock 日志
+    svc_name = topic.get("service_name")
+    if svc_name:
+        logs = get_logs_by_service(svc_name)
+        # 按 query 过滤
+        if query:
+            ql = query.lower()
+            logs = [
+                log for log in logs if ql in log["message"].lower() or ql in log["level"].lower()
+            ]
+        logs = logs[:limit]
+        return {
+            "topic_id": topic_id,
+            "topic_name": topic["topic_name"],
+            "service_name": svc_name,
             "start_time": start_time,
             "end_time": end_time,
             "query": query,
-            "limit": limit,
             "total": len(logs),
             "logs": logs,
             "took_ms": 50,
-            "message": f"成功查询 {len(logs)} 条应用日志",
+            "message": f"成功查询 {len(logs)} 条日志",
         }
-    else:
-        # 其他 topic_id: 返回错误，表示 topic 不存在
-        return {
-            "topic_id": topic_id,
-            "start_time": start_time,
-            "end_time": end_time,
-            "query": query,
-            "limit": limit,
-            "total": 0,
-            "logs": [],
-            "took_ms": 0,
-            "error": f"主题不存在: {topic_id}",
-            "message": f"错误: 未找到主题 {topic_id}，请检查 topic_id 是否正确",
-        }
+
+    return {"topic_id": topic_id, "total": 0, "logs": [], "message": "无日志数据"}
+
+
+# ============================================================
+# 高级日志分析工具（新增）
+# ============================================================
+
+
+@mcp.tool()
+@log_tool_call
+def search_service_logs(
+    service_name: str,
+    log_level: str | None = None,
+    keyword: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """按服务名称搜索日志，支持日志级别和关键词筛选。
+
+    Args:
+        service_name: 服务名称（如 "payment-service"）
+        log_level: 日志级别筛选（INFO/WARN/ERROR/FATAL，可选）
+        keyword: 关键词筛选（可选，如 "timeout"）
+        limit: 返回条数限制（默认50）
+
+    Returns:
+        日志列表，包含 timestamp、level、message、instance。
+        数据与该服务的告警场景一致。
+
+    使用示例:
+        # 查询 payment-service 的所有 ERROR 日志
+        search_service_logs(service_name="payment-service", log_level="ERROR")
+
+        # 查询 data-sync-service 包含 "OOM" 的日志
+        search_service_logs(service_name="data-sync-service", keyword="OOM")
+    """
+    svc = get_service_by_name(service_name)
+    if not svc:
+        return {"error": f"未找到服务: {service_name}", "service_name": service_name, "logs": []}
+
+    logs = get_logs_by_service(service_name)
+
+    # 级别筛选
+    if log_level:
+        log_level_upper = log_level.upper()
+        logs = [log for log in logs if log["level"].upper() == log_level_upper]
+
+    # 关键词筛选
+    if keyword:
+        kw = keyword.lower()
+        logs = [log for log in logs if kw in log["message"].lower()]
+
+    logs = logs[:limit]
+
+    return {
+        "service_name": service_name,
+        "log_level": log_level,
+        "keyword": keyword,
+        "total": len(logs),
+        "logs": logs,
+        "message": f"查询到 {len(logs)} 条日志",
+    }
+
+
+@mcp.tool()
+@log_tool_call
+def analyze_log_pattern(
+    service_name: str,
+    time_range_minutes: int = 60,
+) -> dict[str, Any]:
+    """分析服务日志模式，返回错误频率和异常模式聚类。
+
+    Args:
+        service_name: 服务名称（如 "payment-service"）
+        time_range_minutes: 分析时间范围（分钟，默认60）
+
+    Returns:
+        日志级别分布、错误频率 Top N、异常模式聚类。
+    """
+    svc = get_service_by_name(service_name)
+    if not svc:
+        return {"error": f"未找到服务: {service_name}", "service_name": service_name}
+
+    logs = get_logs_by_service(service_name)
+
+    # 级别分布统计
+    level_counts: dict[str, int] = {}
+    for log in logs:
+        level_counts[log["level"]] = level_counts.get(log["level"], 0) + 1
+
+    # 错误日志模式聚类（按消息关键词）
+    error_patterns: dict[str, int] = {}
+    for log in logs:
+        if log["level"] in ("ERROR", "FATAL"):
+            # 提取关键模式
+            msg = log["message"]
+            if "timeout" in msg.lower() or "超时" in msg:
+                pattern = "超时/Timeout"
+            elif "OOM" in msg or "OutOfMemory" in msg:
+                pattern = "内存溢出/OOM"
+            elif "Connection" in msg or "连接" in msg:
+                pattern = "连接异常"
+            elif "CPU" in msg:
+                pattern = "CPU 告警"
+            elif "disk" in msg.lower() or "磁盘" in msg or "space" in msg.lower():
+                pattern = "磁盘空间不足"
+            elif "GC" in msg:
+                pattern = "GC 异常"
+            elif "crash" in msg.lower() or "启动" in msg:
+                pattern = "崩溃/启动失败"
+            else:
+                pattern = "其他错误"
+            error_patterns[pattern] = error_patterns.get(pattern, 0) + 1
+
+    # 错误频率排序
+    top_errors = sorted(error_patterns.items(), key=lambda x: x[1], reverse=True)
+
+    return {
+        "service_name": service_name,
+        "time_range_minutes": time_range_minutes,
+        "total_logs": len(logs),
+        "level_distribution": level_counts,
+        "error_patterns": [{"pattern": p, "count": c} for p, c in top_errors],
+        "top_error_pattern": top_errors[0][0] if top_errors else None,
+        "analysis_summary": _build_analysis_summary(service_name, level_counts, error_patterns),
+    }
+
+
+def _build_analysis_summary(service_name: str, level_counts: dict, error_patterns: dict) -> str:
+    """构建分析摘要"""
+    error_count = level_counts.get("ERROR", 0) + level_counts.get("FATAL", 0)
+    if error_count == 0:
+        return f"{service_name} 近期无错误日志，日志模式正常"
+
+    top_pattern = max(error_patterns, key=error_patterns.get) if error_patterns else "未知"
+    return f"{service_name} 近期发现 {error_count} 条错误日志，主要异常模式: {top_pattern}"
+
+
+@mcp.tool()
+@log_tool_call
+def query_slow_sql(
+    service_name: str,
+    threshold_ms: int = 1000,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """查询数据库慢 SQL 记录。
+
+    Args:
+        service_name: 服务名称（如 "order-service"）
+        threshold_ms: 慢查询阈值（毫秒，默认1000）
+        limit: 返回条数限制（默认20）
+
+    Returns:
+        慢 SQL 列表，包含 SQL 文本、执行时间、扫描行数、优化建议。
+        order-service 会返回多条慢查询记录。
+    """
+    svc = get_service_by_name(service_name)
+    if not svc:
+        return {"error": f"未找到服务: {service_name}", "service_name": service_name}
+
+    sqls = get_slow_sqls_by_service(service_name)
+    # 按阈值过滤
+    sqls = [s for s in sqls if s["execution_time_ms"] >= threshold_ms]
+    # 按执行时间降序
+    sqls = sorted(sqls, key=lambda x: x["execution_time_ms"], reverse=True)
+    sqls = sqls[:limit]
+
+    return {
+        "service_name": service_name,
+        "threshold_ms": threshold_ms,
+        "total": len(sqls),
+        "slow_sqls": sqls,
+        "summary": {
+            "max_execution_time_ms": sqls[0]["execution_time_ms"] if sqls else 0,
+            "avg_execution_time_ms": round(sum(s["execution_time_ms"] for s in sqls) / len(sqls), 0)
+            if sqls
+            else 0,
+            "total_scan_rows": sum(s["scan_rows"] for s in sqls),
+        },
+    }
+
+
+@mcp.tool()
+@log_tool_call
+def search_system_events(
+    service_name: str,
+    event_type: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """查询系统事件日志（OOM kill、服务重启、crash、磁盘满等）。
+
+    Args:
+        service_name: 服务名称（如 "data-sync-service"）
+        event_type: 事件类型筛选（oom_kill/full_gc/crash/restart/disk_full_warning/thread_pool_exhausted/high_cpu/slow_query，可选）
+        limit: 返回条数限制（默认50）
+
+    Returns:
+        系统事件列表，包含事件类型、严重级别、时间戳、详情。
+    """
+    svc = get_service_by_name(service_name)
+    if not svc:
+        return {"error": f"未找到服务: {service_name}", "service_name": service_name}
+
+    events = get_system_events_by_service(service_name)
+
+    if event_type:
+        events = [e for e in events if e["event_type"] == event_type]
+
+    events = events[:limit]
+
+    return {
+        "service_name": service_name,
+        "event_type_filter": event_type,
+        "total": len(events),
+        "events": events,
+        "summary": {
+            "critical_count": sum(1 for e in events if e["severity"] == "critical"),
+            "warning_count": sum(1 for e in events if e["severity"] == "warning"),
+        },
+    }
+
+
+@mcp.tool()
+@log_tool_call
+def get_log_statistics(
+    service_name: str,
+    time_range_minutes: int = 60,
+) -> dict[str, Any]:
+    """获取服务日志级别分布统计。
+
+    Args:
+        service_name: 服务名称（如 "payment-service"）
+        time_range_minutes: 统计时间范围（分钟，默认60）
+
+    Returns:
+        各级别日志数量、错误率、日志趋势。
+    """
+    svc = get_service_by_name(service_name)
+    if not svc:
+        return {"error": f"未找到服务: {service_name}", "service_name": service_name}
+
+    logs = get_logs_by_service(service_name)
+
+    level_stats: dict[str, int] = {}
+    for log in logs:
+        level_stats[log["level"]] = level_stats.get(log["level"], 0) + 1
+
+    total = len(logs)
+    error_count = level_stats.get("ERROR", 0) + level_stats.get("FATAL", 0)
+    error_rate = round(error_count / total * 100, 1) if total > 0 else 0
+
+    # 按实例统计
+    instance_stats: dict[str, int] = {}
+    for log in logs:
+        inst = log.get("instance", "unknown")
+        instance_stats[inst] = instance_stats.get(inst, 0) + 1
+
+    return {
+        "service_name": service_name,
+        "time_range_minutes": time_range_minutes,
+        "total_logs": total,
+        "level_distribution": level_stats,
+        "error_rate_percent": error_rate,
+        "instance_distribution": instance_stats,
+        "trend": "increasing" if error_rate > 30 else "stable",
+        "alert": error_rate > 30,
+    }
 
 
 if __name__ == "__main__":

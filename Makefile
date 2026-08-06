@@ -21,7 +21,8 @@ NC = \033[0m
         install install-dev dev run test test-quick format lint fix type-check \
         security pre-commit-install pre-commit check-all coverage docs shell \
         ipython watch add add-dev remove list-docs test-upload sync logs \
-        start-cls stop-cls start-monitor stop-monitor start-api stop-api status-mcp
+        start-cls stop-cls start-monitor stop-monitor start-alert stop-alert \
+        start-ops stop-ops start-api stop-api status-mcp
 
 # ============================================================
 # 默认目标：显示帮助信息
@@ -51,6 +52,10 @@ help:
 	@echo "  $(YELLOW)make stop-cls$(NC)      - 🛑 停止 CLS MCP 服务"
 	@echo "  $(YELLOW)make start-monitor$(NC) - 📊 启动 Monitor MCP 服务"
 	@echo "  $(YELLOW)make stop-monitor$(NC)  - 🛑 停止 Monitor MCP 服务"
+	@echo "  $(YELLOW)make start-alert$(NC)   - 🚨 启动 Alert MCP 服务"
+	@echo "  $(YELLOW)make stop-alert$(NC)    - 🛑 停止 Alert MCP 服务"
+	@echo "  $(YELLOW)make start-ops$(NC)     - 🔧 启动 Ops MCP 服务"
+	@echo "  $(YELLOW)make stop-ops$(NC)      - 🛑 停止 Ops MCP 服务"
 	@echo "  $(YELLOW)make start-api$(NC)     - 🚀 启动 FastAPI 服务"
 	@echo "  $(YELLOW)make stop-api$(NC)      - 🛑 停止 FastAPI 服务"
 	@echo ""
@@ -250,6 +255,86 @@ stop-monitor:
 			echo "$(YELLOW)⚠️  没有运行中的 Monitor MCP 进程$(NC)"; \
 	fi
 
+# 启动 Alert MCP 服务
+start-alert:
+	@echo "$(YELLOW)🚨 启动 Alert MCP 服务...$(NC)"
+	@if pgrep -f "mcp_servers/alert_server.py" > /dev/null 2>&1; then \
+		echo "$(GREEN)✅ Alert MCP 服务已经在运行中$(NC)"; \
+	else \
+		echo "$(YELLOW)📦 正在启动 Alert MCP 服务（后台运行）...$(NC)"; \
+		nohup .venv/bin/python mcp_servers/alert_server.py > mcp_alert.log 2>&1 & \
+		echo $$! > mcp_alert.pid; \
+		sleep 2; \
+		if pgrep -f "mcp_servers/alert_server.py" > /dev/null 2>&1; then \
+			echo "$(GREEN)✅ Alert MCP 服务启动成功$(NC)"; \
+			echo "$(YELLOW)   PID: $$(cat mcp_alert.pid)$(NC)"; \
+			echo "$(YELLOW)   URL: http://127.0.0.1:8005/mcp$(NC)"; \
+			echo "$(YELLOW)   日志: mcp_alert.log$(NC)"; \
+		else \
+			echo "$(RED)❌ Alert MCP 服务启动失败$(NC)"; \
+			echo "$(YELLOW)请检查日志: tail -f mcp_alert.log$(NC)"; \
+		fi; \
+	fi
+
+# 停止 Alert MCP 服务
+stop-alert:
+	@echo "$(YELLOW)🛑 停止 Alert MCP 服务...$(NC)"
+	@if [ -f mcp_alert.pid ]; then \
+		pid=$$(cat mcp_alert.pid); \
+		if ps -p $$pid > /dev/null 2>&1; then \
+			kill $$pid; \
+			echo "$(GREEN)✅ Alert MCP 服务已停止 (PID: $$pid)$(NC)"; \
+		else \
+			echo "$(YELLOW)⚠️  进程不存在 (PID: $$pid)$(NC)"; \
+		fi; \
+		rm -f mcp_alert.pid; \
+	else \
+		echo "$(YELLOW)⚠️  未找到 mcp_alert.pid 文件$(NC)"; \
+		pkill -f "mcp_servers/alert_server.py" 2>/dev/null && \
+			echo "$(GREEN)✅ 已停止所有 Alert MCP 进程$(NC)" || \
+			echo "$(YELLOW)⚠️  没有运行中的 Alert MCP 进程$(NC)"; \
+	fi
+
+# 启动 Ops MCP 服务
+start-ops:
+	@echo "$(YELLOW)🔧 启动 Ops MCP 服务...$(NC)"
+	@if pgrep -f "mcp_servers/ops_server.py" > /dev/null 2>&1; then \
+		echo "$(GREEN)✅ Ops MCP 服务已经在运行中$(NC)"; \
+	else \
+		echo "$(YELLOW)📦 正在启动 Ops MCP 服务（后台运行）...$(NC)"; \
+		nohup .venv/bin/python mcp_servers/ops_server.py > mcp_ops.log 2>&1 & \
+		echo $$! > mcp_ops.pid; \
+		sleep 2; \
+		if pgrep -f "mcp_servers/ops_server.py" > /dev/null 2>&1; then \
+			echo "$(GREEN)✅ Ops MCP 服务启动成功$(NC)"; \
+			echo "$(YELLOW)   PID: $$(cat mcp_ops.pid)$(NC)"; \
+			echo "$(YELLOW)   URL: http://127.0.0.1:8006/mcp$(NC)"; \
+			echo "$(YELLOW)   日志: mcp_ops.log$(NC)"; \
+		else \
+			echo "$(RED)❌ Ops MCP 服务启动失败$(NC)"; \
+			echo "$(YELLOW)请检查日志: tail -f mcp_ops.log$(NC)"; \
+		fi; \
+	fi
+
+# 停止 Ops MCP 服务
+stop-ops:
+	@echo "$(YELLOW)🛑 停止 Ops MCP 服务...$(NC)"
+	@if [ -f mcp_ops.pid ]; then \
+		pid=$$(cat mcp_ops.pid); \
+		if ps -p $$pid > /dev/null 2>&1; then \
+			kill $$pid; \
+			echo "$(GREEN)✅ Ops MCP 服务已停止 (PID: $$pid)$(NC)"; \
+		else \
+			echo "$(YELLOW)⚠️  进程不存在 (PID: $$pid)$(NC)"; \
+		fi; \
+		rm -f mcp_ops.pid; \
+	else \
+		echo "$(YELLOW)⚠️  未找到 mcp_ops.pid 文件$(NC)"; \
+		pkill -f "mcp_servers/ops_server.py" 2>/dev/null && \
+			echo "$(GREEN)✅ 已停止所有 Ops MCP 进程$(NC)" || \
+			echo "$(YELLOW)⚠️  没有运行中的 Ops MCP 进程$(NC)"; \
+	fi
+
 # 检查 MCP 服务状态
 status-mcp:
 	@echo "$(YELLOW)📊 MCP 服务状态:$(NC)"
@@ -280,8 +365,31 @@ status-mcp:
 		echo "  状态: $(RED)未运行$(NC)"; \
 	fi
 	@echo ""
-	@echo "$(CYAN)Math MCP 服务:$(NC)"
-	@echo "  状态: $(YELLOW)已移除（示例服务）$(NC)"
+	@echo "$(CYAN)Alert MCP 服务:$(NC)"
+	@if pgrep -f "mcp_servers/alert_server.py" > /dev/null 2>&1; then \
+		pid=$$(pgrep -f "mcp_servers/alert_server.py"); \
+		echo "  状态: $(GREEN)运行中$(NC)"; \
+		echo "  PID: $$pid"; \
+		echo "  URL: http://127.0.0.1:8005/mcp"; \
+		curl -s http://127.0.0.1:8005/mcp > /dev/null 2>&1 && \
+			echo "  连接: $(GREEN)✅ 正常$(NC)" || \
+			echo "  连接: $(RED)❌ 无法连接$(NC)"; \
+	else \
+		echo "  状态: $(RED)未运行$(NC)"; \
+	fi
+	@echo ""
+	@echo "$(CYAN)Ops MCP 服务:$(NC)"
+	@if pgrep -f "mcp_servers/ops_server.py" > /dev/null 2>&1; then \
+		pid=$$(pgrep -f "mcp_servers/ops_server.py"); \
+		echo "  状态: $(GREEN)运行中$(NC)"; \
+		echo "  PID: $$pid"; \
+		echo "  URL: http://127.0.0.1:8006/mcp"; \
+		curl -s http://127.0.0.1:8006/mcp > /dev/null 2>&1 && \
+			echo "  连接: $(GREEN)✅ 正常$(NC)" || \
+			echo "  连接: $(RED)❌ 无法连接$(NC)"; \
+	else \
+		echo "  状态: $(RED)未运行$(NC)"; \
+	fi
 
 # ============================================================
 # FastAPI 服务管理
@@ -297,6 +405,12 @@ start:
 	@sleep 1
 	@echo ""
 	@$(MAKE) start-monitor
+	@sleep 1
+	@echo ""
+	@$(MAKE) start-alert
+	@sleep 1
+	@echo ""
+	@$(MAKE) start-ops
 	@sleep 1
 	@echo ""
 	@$(MAKE) start-api
@@ -331,6 +445,10 @@ stop:
 	@$(MAKE) stop-cls
 	@echo ""
 	@$(MAKE) stop-monitor
+	@echo ""
+	@$(MAKE) stop-alert
+	@echo ""
+	@$(MAKE) stop-ops
 	@echo ""
 	@echo "$(GREEN)═══════════════════════════════════════════════════════$(NC)"
 	@echo "$(GREEN)✅ 所有服务已停止！$(NC)"
@@ -604,6 +722,8 @@ clean:  ## 清理临时文件
 	rm -f server.pid server.log
 	rm -f mcp_cls.pid mcp_cls.log
 	rm -f mcp_monitor.pid mcp_monitor.log
+	rm -f mcp_alert.pid mcp_alert.log
+	rm -f mcp_ops.pid mcp_ops.log
 	rm -rf uploads/*.tmp 2>/dev/null || true
 	@echo "$(GREEN)✅ 清理完成$(NC)"
 
