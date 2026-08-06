@@ -564,4 +564,4 @@ def get_log_statistics(
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(mcp.streamable_http_app(), host="127.0.0.1", port=8003)
+    uvicorn.run(mcp.streamable_http_app(), host="127.0.0.1", port=8103)

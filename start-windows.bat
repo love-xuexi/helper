@@ -144,24 +144,28 @@ echo [7/8] Starting MCP services (AIOps)...
 if not exist "logs\mcp" mkdir "logs\mcp"
 for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "MCP_TS=%%I"
 
-REM Start CLS MCP Server (port 8003)
+REM Start CLS MCP Server (port 8103)
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process -FilePath '%PYTHON_CMD%' -ArgumentList '-m','mcp_servers.cls_server' -RedirectStandardOutput 'logs\mcp\cls_!MCP_TS!.log' -RedirectStandardError 'logs\mcp\cls_err_!MCP_TS!.log' -WindowStyle Hidden -PassThru; Set-Content -Path 'mcp_cls.pid' -Value $p.Id -NoNewline -Encoding ascii"
-echo [INFO] CLS MCP Server starting on http://127.0.0.1:8003/mcp
+echo [INFO] CLS MCP Server starting on http://127.0.0.1:8103/mcp
 
-REM Start Monitor MCP Server (port 8004)
+REM Start Monitor MCP Server (port 8104)
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process -FilePath '%PYTHON_CMD%' -ArgumentList '-m','mcp_servers.monitor_server' -RedirectStandardOutput 'logs\mcp\monitor_!MCP_TS!.log' -RedirectStandardError 'logs\mcp\monitor_err_!MCP_TS!.log' -WindowStyle Hidden -PassThru; Set-Content -Path 'mcp_monitor.pid' -Value $p.Id -NoNewline -Encoding ascii"
-echo [INFO] Monitor MCP Server starting on http://127.0.0.1:8004/mcp
+echo [INFO] Monitor MCP Server starting on http://127.0.0.1:8104/mcp
 
-REM Start Alert MCP Server (port 8005)
+REM Start Alert MCP Server (port 8105)
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process -FilePath '%PYTHON_CMD%' -ArgumentList '-m','mcp_servers.alert_server' -RedirectStandardOutput 'logs\mcp\alert_!MCP_TS!.log' -RedirectStandardError 'logs\mcp\alert_err_!MCP_TS!.log' -WindowStyle Hidden -PassThru; Set-Content -Path 'mcp_alert.pid' -Value $p.Id -NoNewline -Encoding ascii"
-echo [INFO] Alert MCP Server starting on http://127.0.0.1:8005/mcp
+echo [INFO] Alert MCP Server starting on http://127.0.0.1:8105/mcp
 
-REM Start Ops MCP Server (port 8006)
+REM Start Ops MCP Server (port 8106)
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process -FilePath '%PYTHON_CMD%' -ArgumentList '-m','mcp_servers.ops_server' -RedirectStandardOutput 'logs\mcp\ops_!MCP_TS!.log' -RedirectStandardError 'logs\mcp\ops_err_!MCP_TS!.log' -WindowStyle Hidden -PassThru; Set-Content -Path 'mcp_ops.pid' -Value $p.Id -NoNewline -Encoding ascii"
-echo [INFO] Ops MCP Server starting on http://127.0.0.1:8006/mcp
+echo [INFO] Ops MCP Server starting on http://127.0.0.1:8106/mcp
+
+REM Start DuckDuckGo Search MCP Server (port 8107)
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process -FilePath '%PYTHON_CMD%' -ArgumentList '-m','mcp_servers.ddg_server' -RedirectStandardOutput 'logs\mcp\ddg_!MCP_TS!.log' -RedirectStandardError 'logs\mcp\ddg_err_!MCP_TS!.log' -WindowStyle Hidden -PassThru; Set-Content -Path 'mcp_ddg.pid' -Value $p.Id -NoNewline -Encoding ascii"
+echo [INFO] DuckDuckGo Search MCP Server starting on http://127.0.0.1:8107/mcp
 
 timeout /t 3 /nobreak >nul
-echo [OK] MCP services started (4 servers).
+echo [OK] MCP services started (5 servers).
 echo.
 
 echo [8/8] Starting FastAPI service...
@@ -225,11 +229,12 @@ echo Live tail:   powershell -NoProfile -Command "Get-Content -Path '!SERVER_LOG
 echo Stop:        stop-windows.bat
 echo.
 echo [NOTE] Knowledge base API must be reachable at the configured internal addresses.
-echo [NOTE] MCP services (AIOps) are started automatically ^(4 servers^):
-echo   CLS     - http://127.0.0.1:8003/mcp  ^(log query^)
-echo   Monitor - http://127.0.0.1:8004/mcp  ^(metrics ^& service info^)
-echo   Alert   - http://127.0.0.1:8005/mcp  ^(alert management^)
-echo   Ops     - http://127.0.0.1:8006/mcp  ^(deploy, tickets, runbooks^)
+echo [NOTE] MCP services (AIOps) are started automatically ^(5 servers^):
+echo   CLS     - http://127.0.0.1:8103/mcp  ^(log query^)
+echo   Monitor - http://127.0.0.1:8104/mcp  ^(metrics ^& service info^)
+echo   Alert   - http://127.0.0.1:8105/mcp  ^(alert management^)
+echo   Ops     - http://127.0.0.1:8106/mcp  ^(deploy, tickets, runbooks^)
+echo   DuckDuckGo - http://127.0.0.1:8107/mcp  ^(web search^)
 echo   MCP logs: logs\mcp\
 echo ====================================
 goto :done

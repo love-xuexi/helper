@@ -308,4 +308,4 @@ def get_alert_summary() -> dict[str, Any]:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(mcp.streamable_http_app(), host="127.0.0.1", port=8005)
+    uvicorn.run(mcp.streamable_http_app(), host="127.0.0.1", port=8105)

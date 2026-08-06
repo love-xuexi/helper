@@ -1,5 +1,5 @@
 /**
- * 智能问答助手 - 前端应用
+ * 知识中台提效助手 - 前端应用
  *
  * 功能：
  * 1. RAG 智能问答（流式/快速）
@@ -671,7 +671,7 @@ class SmartQAApp {
                         ) {
                             try {
                                 const parsed = JSON.parse(msg.content);
-                                if (parsed && parsed.type === 'agent') {
+                                if (parsed && (parsed.type === 'agent' || parsed.type === 'multi_agent')) {
                                     return {
                                         type: 'assistant',
                                         content: '',
@@ -1053,7 +1053,7 @@ class SmartQAApp {
             }
 
             // 创建 Worker 卡片
-            this.createWorkerCard(container, route);
+            this.createWorkerCard(container, route, flowState);
 
             if (statusSpan) {
                 statusSpan.textContent = `${route.workerEmoji} ${route.workerName} 执行中…`;
@@ -1075,6 +1075,11 @@ class SmartQAApp {
                 const statusBadge = card.querySelector('.ma-worker-status');
                 if (statusBadge) statusBadge.textContent = '✅ 完成';
             }
+            // 将结果存入 flowState.routes，供持久化使用
+            const route = flowState.routes.find(r => r.worker === worker);
+            if (route) {
+                route.result = evt.result_preview || evt.result || '';
+            }
             if (statusSpan) {
                 statusSpan.textContent = `${evt.worker_emoji || ''} ${evt.worker_name || worker} 完成`;
             }
@@ -1090,7 +1095,7 @@ class SmartQAApp {
         }
     }
 
-    createWorkerCard(container, route) {
+    createWorkerCard(container, route, flowState) {
         const workersDiv = container.querySelector('.ma-workers');
         if (!workersDiv) return;
 
@@ -1108,16 +1113,9 @@ class SmartQAApp {
         `;
         workersDiv.appendChild(card);
 
-        // 缓存卡片引用
-        if (!container._flowState) container._flowState = {};
-        const flowState = container._flowState;
-        if (!flowState.workerCards) flowState.workerCards = {};
-        // Also update the passed flowState
-        const parent = container.closest('.agent-flow');
-        // Actually we need to pass flowState differently - let's use dataset
-        card.dataset.workerKey = route.worker;
-
-        // Store reference on the container itself
+        // 缓存卡片引用到 flowState 和 container（双写，确保 worker_complete 能找到）
+        if (flowState && !flowState.workerCards) flowState.workerCards = {};
+        if (flowState) flowState.workerCards[route.worker] = card;
         if (!container._workerCards) container._workerCards = {};
         container._workerCards[route.worker] = card;
 
@@ -1222,6 +1220,9 @@ class SmartQAApp {
         routes.forEach((r) => {
             const card = document.createElement('div');
             card.className = `ma-worker-card ${r.worker} done`;
+            const resultHtml = r.result
+                ? `<div class="ma-worker-result">${this.escapeHtml(r.result)}</div>`
+                : '';
             card.innerHTML = `
                 <div class="ma-worker-header">
                     <span class="ma-worker-emoji">${r.workerEmoji || '🤖'}</span>
@@ -1229,6 +1230,7 @@ class SmartQAApp {
                     <span class="ma-worker-subtask">${this.escapeHtml(r.subtask || '')}</span>
                     <span class="ma-worker-status">✅ 完成</span>
                 </div>
+                ${resultHtml}
             `;
             if (workersDiv) workersDiv.appendChild(card);
         });

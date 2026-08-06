@@ -32,6 +32,9 @@ WORKER_TOOL_NAMES: dict[str, list[str]] = {
         "search_log",
         "search_system_events",
         "get_log_statistics",
+        # DuckDuckGo 联网搜索工具
+        "web_search",
+        "web_search_suggest",
         # 本地工具
         "get_current_time",
     ],

@@ -67,7 +67,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=config.app_name,
     version=config.app_version,
-    description="基于知识库 API 的智能问答助手，支持 RAG 检索、引用标注、反馈评价",
+    description="基于知识库 API 的知识中台提效助手，支持 RAG 检索、引用标注、反馈评价",
     lifespan=lifespan,
 )
 

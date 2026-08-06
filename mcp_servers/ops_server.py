@@ -356,4 +356,4 @@ def get_runbook(issue_type: str) -> dict[str, Any]:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(mcp.streamable_http_app(), host="127.0.0.1", port=8006)
+    uvicorn.run(mcp.streamable_http_app(), host="127.0.0.1", port=8106)

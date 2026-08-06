@@ -1,11 +1,13 @@
 # MCP Servers
 
-为 AIOps 智能诊断提供丰富的 mock 工具集，覆盖告警、监控、日志、部署、工单等运维场景。
+为 AIOps 智能诊断提供丰富的 mock 工具集，覆盖告警、监控、日志、部署、工单等运维场景，并支持 DuckDuckGo 联网搜索。
+
+> **端口约定**：所有 MCP 服务端口统一使用 **8100 段**（不使用 8000 段）。
 
 ## 📚 服务列表
 
 ### CLS Server (`cls_server.py`)
-**日志查询服务** — 端口 8003
+**日志查询服务** — 端口 **8103**
 
 | 工具 | 说明 |
 |------|------|
@@ -21,7 +23,7 @@
 | `get_log_statistics` | 日志级别分布统计 |
 
 ### Monitor Server (`monitor_server.py`)
-**监控数据服务** — 端口 8004
+**监控数据服务** — 端口 **8104**
 
 | 工具 | 说明 |
 |------|------|
@@ -43,7 +45,7 @@
 | `get_service_topology` | 服务依赖拓扑 |
 
 ### Alert Server (`alert_server.py`)
-**告警管理服务** — 端口 8005
+**告警管理服务** — 端口 **8105**
 
 | 工具 | 说明 |
 |------|------|
@@ -55,7 +57,7 @@
 | `get_alert_summary` | 告警概览统计 |
 
 ### Ops Server (`ops_server.py`)
-**运维操作服务** — 端口 8006
+**运维操作服务** — 端口 **8106**
 
 | 工具 | 说明 |
 |------|------|
@@ -67,6 +69,16 @@
 | `search_historical_tickets` | 历史工单查询 |
 | `get_runbook` | 获取运维手册/SOP |
 
+### DuckDuckGo Search Server (`ddg_server.py`)
+**联网搜索服务** — 端口 **8107**
+
+| 工具 | 说明 |
+|------|------|
+| `web_search` | 通用网页搜索（DuckDuckGo，完全免费无需 API Key） |
+| `web_search_suggest` | 搜索建议词查询 |
+
+完全免费、无需注册、无需 API Key。如网络无法直接访问 DuckDuckGo，可配置 `DDG_PROXY` 环境变量走代理；无代理时返回 mock 搜索结果保证 Agent 流程不中断。
+
 ## 🚀 快速开始
 
 ### 启动服务
@@ -75,21 +87,22 @@
 ```bat
 start-windows.bat
 ```
-自动启动全部 4 个 MCP Server + FastAPI 服务。
+自动启动全部 5 个 MCP Server + FastAPI 服务。
 
 **方式二：Makefile（Linux/macOS）**
 ```bash
-make start       # 启动所有服务（4 MCP + FastAPI）
+make start       # 启动所有服务（5 MCP + FastAPI）
 make stop        # 停止所有服务
 make status-mcp  # 查看服务状态
 ```
 
 **方式三：手动启动**
 ```bash
-python mcp_servers/cls_server.py      # 端口 8003
-python mcp_servers/monitor_server.py  # 端口 8004
-python mcp_servers/alert_server.py    # 端口 8005
-python mcp_servers/ops_server.py      # 端口 8006
+python mcp_servers/cls_server.py      # 端口 8103
+python mcp_servers/monitor_server.py  # 端口 8104
+python mcp_servers/alert_server.py    # 端口 8105
+python mcp_servers/ops_server.py      # 端口 8106
+python mcp_servers/ddg_server.py      # 端口 8107
 ```
 
 ## 💡 Mock 场景说明

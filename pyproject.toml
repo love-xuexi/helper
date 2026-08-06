@@ -33,6 +33,7 @@ dependencies = [
     "langchain-mcp-adapters>=0.2.1",
     "fastmcp>=2.14.0",
     "langchain-qwq>=0.3.4",
+    "duckduckgo-search>=8.1.1",
 ]
 
 [project.optional-dependencies]

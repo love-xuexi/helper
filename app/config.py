@@ -120,14 +120,17 @@ class Settings(BaseSettings):
     chunk_overlap: int = 100
 
     # MCP 服务配置
+    # 端口统一使用 8100 段（CLS=8103, Monitor=8104, Alert=8105, Ops=8106, DDG=8107）
     mcp_cls_transport: str = "streamable-http"
-    mcp_cls_url: str = "http://localhost:8003/mcp"
+    mcp_cls_url: str = "http://localhost:8103/mcp"
     mcp_monitor_transport: str = "streamable-http"
-    mcp_monitor_url: str = "http://localhost:8004/mcp"
+    mcp_monitor_url: str = "http://localhost:8104/mcp"
     mcp_alert_transport: str = "streamable-http"
-    mcp_alert_url: str = "http://localhost:8005/mcp"
+    mcp_alert_url: str = "http://localhost:8105/mcp"
     mcp_ops_transport: str = "streamable-http"
-    mcp_ops_url: str = "http://localhost:8006/mcp"
+    mcp_ops_url: str = "http://localhost:8106/mcp"
+    mcp_ddg_transport: str = "streamable-http"
+    mcp_ddg_url: str = "http://localhost:8107/mcp"
 
     @property
     def is_postgres_checkpoint_enabled(self) -> bool:
@@ -164,6 +167,10 @@ class Settings(BaseSettings):
             "ops": {
                 "transport": self.mcp_ops_transport,
                 "url": self.mcp_ops_url,
+            },
+            "ddg": {
+                "transport": self.mcp_ddg_transport,
+                "url": self.mcp_ddg_url,
             },
         }
 

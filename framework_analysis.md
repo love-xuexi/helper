@@ -13,7 +13,7 @@
 |----|-----|
 | 项目名 | super-biz-agent-py（品牌"知行助手"） |
 | 版本 | 1.2.1 |
-| 定位 | 基于知识库 API 的智能问答助手，支持 RAG 检索、引用标注、反馈评价、Bug 上报 |
+| 定位 | 基于知识库 API 的知识中台提效助手，支持 RAG 检索、引用标注、反馈评价、Bug 上报 |
 | 技术栈 | FastAPI + LangChain/LangGraph + vanilla JS |
 | 端口 | 9983 |
 | Python | ≥3.11, <3.14 |

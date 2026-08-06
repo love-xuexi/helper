@@ -22,7 +22,7 @@ NC = \033[0m
         security pre-commit-install pre-commit check-all coverage docs shell \
         ipython watch add add-dev remove list-docs test-upload sync logs \
         start-cls stop-cls start-monitor stop-monitor start-alert stop-alert \
-        start-ops stop-ops start-api stop-api status-mcp
+        start-ops stop-ops start-ddg stop-ddg start-api stop-api status-mcp
 
 # ============================================================
 # 默认目标：显示帮助信息
@@ -56,6 +56,8 @@ help:
 	@echo "  $(YELLOW)make stop-alert$(NC)    - 🛑 停止 Alert MCP 服务"
 	@echo "  $(YELLOW)make start-ops$(NC)     - 🔧 启动 Ops MCP 服务"
 	@echo "  $(YELLOW)make stop-ops$(NC)      - 🛑 停止 Ops MCP 服务"
+	@echo "  $(YELLOW)make start-ddg$(NC)     - 🔍 启动 DuckDuckGo Search MCP 服务"
+	@echo "  $(YELLOW)make stop-ddg$(NC)      - 🛑 停止 DuckDuckGo Search MCP 服务"
 	@echo "  $(YELLOW)make start-api$(NC)     - 🚀 启动 FastAPI 服务"
 	@echo "  $(YELLOW)make stop-api$(NC)      - 🛑 停止 FastAPI 服务"
 	@echo ""
@@ -207,7 +209,7 @@ start-cls:
 		if pgrep -f "mcp_servers/cls_server.py" > /dev/null 2>&1; then \
 			echo "$(GREEN)✅ CLS MCP 服务启动成功$(NC)"; \
 			echo "$(YELLOW)   PID: $$(cat mcp_cls.pid)$(NC)"; \
-			echo "$(YELLOW)   URL: http://127.0.0.1:8003/mcp$(NC)"; \
+			echo "$(YELLOW)   URL: http://127.0.0.1:8103/mcp$(NC)"; \
 			echo "$(YELLOW)   日志: mcp_cls.log$(NC)"; \
 		else \
 			echo "$(RED)❌ CLS MCP 服务启动失败$(NC)"; \
@@ -228,7 +230,7 @@ start-monitor:
 		if pgrep -f "mcp_servers/monitor_server.py" > /dev/null 2>&1; then \
 			echo "$(GREEN)✅ Monitor MCP 服务启动成功$(NC)"; \
 			echo "$(YELLOW)   PID: $$(cat mcp_monitor.pid)$(NC)"; \
-			echo "$(YELLOW)   URL: http://127.0.0.1:8004/mcp$(NC)"; \
+			echo "$(YELLOW)   URL: http://127.0.0.1:8104/mcp$(NC)"; \
 			echo "$(YELLOW)   日志: mcp_monitor.log$(NC)"; \
 		else \
 			echo "$(RED)❌ Monitor MCP 服务启动失败$(NC)"; \
@@ -268,7 +270,7 @@ start-alert:
 		if pgrep -f "mcp_servers/alert_server.py" > /dev/null 2>&1; then \
 			echo "$(GREEN)✅ Alert MCP 服务启动成功$(NC)"; \
 			echo "$(YELLOW)   PID: $$(cat mcp_alert.pid)$(NC)"; \
-			echo "$(YELLOW)   URL: http://127.0.0.1:8005/mcp$(NC)"; \
+			echo "$(YELLOW)   URL: http://127.0.0.1:8105/mcp$(NC)"; \
 			echo "$(YELLOW)   日志: mcp_alert.log$(NC)"; \
 		else \
 			echo "$(RED)❌ Alert MCP 服务启动失败$(NC)"; \
@@ -308,7 +310,7 @@ start-ops:
 		if pgrep -f "mcp_servers/ops_server.py" > /dev/null 2>&1; then \
 			echo "$(GREEN)✅ Ops MCP 服务启动成功$(NC)"; \
 			echo "$(YELLOW)   PID: $$(cat mcp_ops.pid)$(NC)"; \
-			echo "$(YELLOW)   URL: http://127.0.0.1:8006/mcp$(NC)"; \
+			echo "$(YELLOW)   URL: http://127.0.0.1:8106/mcp$(NC)"; \
 			echo "$(YELLOW)   日志: mcp_ops.log$(NC)"; \
 		else \
 			echo "$(RED)❌ Ops MCP 服务启动失败$(NC)"; \
@@ -335,6 +337,46 @@ stop-ops:
 			echo "$(YELLOW)⚠️  没有运行中的 Ops MCP 进程$(NC)"; \
 	fi
 
+# 启动 DuckDuckGo Search MCP 服务
+start-ddg:
+	@echo "$(YELLOW)🔍 启动 DuckDuckGo Search MCP 服务...$(NC)"
+	@if pgrep -f "mcp_servers/ddg_server.py" > /dev/null 2>&1; then \
+		echo "$(GREEN)✅ DuckDuckGo Search MCP 服务已经在运行中$(NC)"; \
+	else \
+		echo "$(YELLOW)📦 正在启动 DuckDuckGo Search MCP 服务（后台运行）...$(NC)"; \
+		nohup .venv/bin/python mcp_servers/ddg_server.py > mcp_ddg.log 2>&1 & \
+		echo $$! > mcp_ddg.pid; \
+		sleep 2; \
+		if pgrep -f "mcp_servers/ddg_server.py" > /dev/null 2>&1; then \
+			echo "$(GREEN)✅ DuckDuckGo Search MCP 服务启动成功$(NC)"; \
+			echo "$(YELLOW)   PID: $$(cat mcp_ddg.pid)$(NC)"; \
+			echo "$(YELLOW)   URL: http://127.0.0.1:8107/mcp$(NC)"; \
+			echo "$(YELLOW)   日志: mcp_ddg.log$(NC)"; \
+		else \
+			echo "$(RED)❌ DuckDuckGo Search MCP 服务启动失败$(NC)"; \
+			echo "$(YELLOW)请检查日志: tail -f mcp_ddg.log$(NC)"; \
+		fi; \
+	fi
+
+# 停止 DuckDuckGo Search MCP 服务
+stop-ddg:
+	@echo "$(YELLOW)🛑 停止 DuckDuckGo Search MCP 服务...$(NC)"
+	@if [ -f mcp_ddg.pid ]; then \
+		pid=$$(cat mcp_ddg.pid); \
+		if ps -p $$pid > /dev/null 2>&1; then \
+			kill $$pid; \
+			echo "$(GREEN)✅ DuckDuckGo Search MCP 服务已停止 (PID: $$pid)$(NC)"; \
+		else \
+			echo "$(YELLOW)⚠️  进程不存在 (PID: $$pid)$(NC)"; \
+		fi; \
+		rm -f mcp_ddg.pid; \
+	else \
+		echo "$(YELLOW)⚠️  未找到 mcp_ddg.pid 文件$(NC)"; \
+		pkill -f "mcp_servers/ddg_server.py" 2>/dev/null && \
+			echo "$(GREEN)✅ 已停止所有 DuckDuckGo Search MCP 进程$(NC)" || \
+			echo "$(YELLOW)⚠️  没有运行中的 DuckDuckGo Search MCP 进程$(NC)"; \
+	fi
+
 # 检查 MCP 服务状态
 status-mcp:
 	@echo "$(YELLOW)📊 MCP 服务状态:$(NC)"
@@ -344,8 +386,8 @@ status-mcp:
 		pid=$$(pgrep -f "mcp_servers/cls_server.py"); \
 		echo "  状态: $(GREEN)运行中$(NC)"; \
 		echo "  PID: $$pid"; \
-		echo "  URL: http://127.0.0.1:8003/mcp"; \
-		curl -s http://127.0.0.1:8003/mcp > /dev/null 2>&1 && \
+		echo "  URL: http://127.0.0.1:8103/mcp"; \
+		curl -s http://127.0.0.1:8103/mcp > /dev/null 2>&1 && \
 			echo "  连接: $(GREEN)✅ 正常$(NC)" || \
 			echo "  连接: $(RED)❌ 无法连接$(NC)"; \
 	else \
@@ -357,8 +399,8 @@ status-mcp:
 		pid=$$(pgrep -f "mcp_servers/monitor_server.py"); \
 		echo "  状态: $(GREEN)运行中$(NC)"; \
 		echo "  PID: $$pid"; \
-		echo "  URL: http://127.0.0.1:8004/mcp"; \
-		curl -s http://127.0.0.1:8004/mcp > /dev/null 2>&1 && \
+		echo "  URL: http://127.0.0.1:8104/mcp"; \
+		curl -s http://127.0.0.1:8104/mcp > /dev/null 2>&1 && \
 			echo "  连接: $(GREEN)✅ 正常$(NC)" || \
 			echo "  连接: $(RED)❌ 无法连接$(NC)"; \
 	else \
@@ -370,8 +412,8 @@ status-mcp:
 		pid=$$(pgrep -f "mcp_servers/alert_server.py"); \
 		echo "  状态: $(GREEN)运行中$(NC)"; \
 		echo "  PID: $$pid"; \
-		echo "  URL: http://127.0.0.1:8005/mcp"; \
-		curl -s http://127.0.0.1:8005/mcp > /dev/null 2>&1 && \
+		echo "  URL: http://127.0.0.1:8105/mcp"; \
+		curl -s http://127.0.0.1:8105/mcp > /dev/null 2>&1 && \
 			echo "  连接: $(GREEN)✅ 正常$(NC)" || \
 			echo "  连接: $(RED)❌ 无法连接$(NC)"; \
 	else \
@@ -383,8 +425,21 @@ status-mcp:
 		pid=$$(pgrep -f "mcp_servers/ops_server.py"); \
 		echo "  状态: $(GREEN)运行中$(NC)"; \
 		echo "  PID: $$pid"; \
-		echo "  URL: http://127.0.0.1:8006/mcp"; \
-		curl -s http://127.0.0.1:8006/mcp > /dev/null 2>&1 && \
+		echo "  URL: http://127.0.0.1:8106/mcp"; \
+		curl -s http://127.0.0.1:8106/mcp > /dev/null 2>&1 && \
+			echo "  连接: $(GREEN)✅ 正常$(NC)" || \
+			echo "  连接: $(RED)❌ 无法连接$(NC)"; \
+	else \
+		echo "  状态: $(RED)未运行$(NC)"; \
+	fi
+	@echo ""
+	@echo "$(CYAN)DuckDuckGo Search MCP 服务:$(NC)"
+	@if pgrep -f "mcp_servers/ddg_server.py" > /dev/null 2>&1; then \
+		pid=$$(pgrep -f "mcp_servers/ddg_server.py"); \
+		echo "  状态: $(GREEN)运行中$(NC)"; \
+		echo "  PID: $$pid"; \
+		echo "  URL: http://127.0.0.1:8107/mcp"; \
+		curl -s http://127.0.0.1:8107/mcp > /dev/null 2>&1 && \
 			echo "  连接: $(GREEN)✅ 正常$(NC)" || \
 			echo "  连接: $(RED)❌ 无法连接$(NC)"; \
 	else \
@@ -411,6 +466,9 @@ start:
 	@sleep 1
 	@echo ""
 	@$(MAKE) start-ops
+	@sleep 1
+	@echo ""
+	@$(MAKE) start-ddg
 	@sleep 1
 	@echo ""
 	@$(MAKE) start-api
@@ -449,6 +507,8 @@ stop:
 	@$(MAKE) stop-alert
 	@echo ""
 	@$(MAKE) stop-ops
+	@echo ""
+	@$(MAKE) stop-ddg
 	@echo ""
 	@echo "$(GREEN)═══════════════════════════════════════════════════════$(NC)"
 	@echo "$(GREEN)✅ 所有服务已停止！$(NC)"
@@ -724,6 +784,7 @@ clean:  ## 清理临时文件
 	rm -f mcp_monitor.pid mcp_monitor.log
 	rm -f mcp_alert.pid mcp_alert.log
 	rm -f mcp_ops.pid mcp_ops.log
+	rm -f mcp_ddg.pid mcp_ddg.log
 	rm -rf uploads/*.tmp 2>/dev/null || true
 	@echo "$(GREEN)✅ 清理完成$(NC)"
 

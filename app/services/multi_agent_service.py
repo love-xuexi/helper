@@ -96,24 +96,30 @@ class MultiAgentService:
                 final_report = final_state.values.get("final_report", "")
                 worker_results = final_state.values.get("worker_results", [])
 
-            # 持久化
+            # 持久化：存为 multi_agent 格式，前端按 type==='multi_agent' 还原执行流程
             try:
-                steps_data = [
-                    {
-                        "step": f"{wr.get('worker', '')}: {wr.get('subtask', '')}",
-                        "result": wr.get("result", ""),
-                    }
-                    for wr in worker_results
-                ]
-                plan = [f"{wr.get('worker', '')}: {wr.get('subtask', '')}" for wr in worker_results]
-                session_persistence_manager.upsert_agent_session(
+                routes = []
+                for wr in worker_results:
+                    worker = wr.get("worker", "")
+                    profile = WORKER_PROFILES.get(worker, {})
+                    routes.append(
+                        {
+                            "worker": worker,
+                            "workerName": profile.get("name", worker),
+                            "workerEmoji": profile.get("emoji", "🤖"),
+                            "subtask": wr.get("subtask", ""),
+                            "result": wr.get("result", ""),
+                        }
+                    )
+                session_persistence_manager.upsert_multi_agent_session(
                     session_id=session_id,
                     task=user_input,
-                    plan=plan,
-                    steps=steps_data,
+                    routes=routes,
                     report=final_report,
                 )
-                logger.info(f"[多Agent 会话 {session_id}] 任务已持久化（{len(steps_data)} 步）")
+                logger.info(
+                    f"[多Agent 会话 {session_id}] 任务已持久化（{len(routes)} 轮 Worker 调用）"
+                )
             except Exception as persist_err:
                 logger.error(f"[多Agent 会话 {session_id}] 持久化失败: {persist_err}")
 

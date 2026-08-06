@@ -634,6 +634,50 @@ class SessionPersistenceManager:
         if self.in_memory_store is not None:
             self.in_memory_store.upsert_session(metadata)
 
+    def upsert_multi_agent_session(
+        self,
+        session_id: str,
+        task: str,
+        routes: list[dict[str, Any]],
+        report: str,
+        user_id: str = "",
+    ) -> None:
+        """持久化多 Agent 协作模式（Supervisor-Worker）的完整执行记录。
+
+        存储格式：
+        - chat_sessions 表：title=task[:30]，preview=report[:80]
+        - chat_messages 表：
+          - role='user'，content=task
+          - role='assistant'，content=JSON({"type":"multi_agent","task":"...","routes":[...],"report":"..."})
+
+        routes 元素结构：{worker, worker_name, worker_emoji, subtask, result}
+        前端加载历史时按 type==='multi_agent' 识别，调 addMultiAgentMessageFromHistory 还原。
+        """
+        import json
+
+        flow_data = {
+            "type": "multi_agent",
+            "task": task,
+            "routes": routes,
+            "report": report,
+        }
+        flow_json = json.dumps(flow_data, ensure_ascii=False)
+        metadata = ChatSessionMetadata.from_agent_session(
+            session_id=session_id,
+            task=task,
+            flow_json=flow_json,
+            report=report,
+            user_id=user_id,
+        )
+        if self.sqlite_store is not None:
+            self.sqlite_store.upsert_session(metadata)
+            return
+        if self.session_store is not None:
+            self.session_store.upsert_session(metadata)
+            return
+        if self.in_memory_store is not None:
+            self.in_memory_store.upsert_session(metadata)
+
     def list_chat_sessions(
         self,
         limit: int = 50,
