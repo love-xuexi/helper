@@ -2084,3 +2084,110 @@ body {
     border-color: var(--danger);
     color: var(--danger);
 }
+
+/* ============================================================
+   多 Agent 协作模式（Multi-Agent Supervisor-Worker）
+   ============================================================ */
+
+/* Multi-Agent 流程容器 */
+.ma-flow-wrapper {
+    border-left: 3px solid var(--primary);
+}
+
+/* Worker 卡片 */
+.ma-worker-card {
+    background: var(--bg-sidebar);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    margin: 8px 0;
+    overflow: hidden;
+    transition: border-color 0.2s;
+}
+
+.ma-worker-card.researcher {
+    border-left: 3px solid #4a90d9;
+}
+
+.ma-worker-card.analyst {
+    border-left: 3px solid #f5a623;
+}
+
+.ma-worker-card.executor {
+    border-left: 3px solid #e74c3c;
+}
+
+.ma-worker-card.writer {
+    border-left: 3px solid #9b59b6;
+}
+
+.ma-worker-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    font-size: 13px;
+    flex-wrap: wrap;
+}
+
+.ma-worker-emoji {
+    font-size: 18px;
+    flex-shrink: 0;
+}
+
+.ma-worker-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    flex-shrink: 0;
+}
+
+.ma-worker-subtask {
+    color: var(--text-secondary);
+    font-size: 12px;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ma-worker-status {
+    font-size: 11px;
+    color: var(--primary);
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.ma-worker-card.done .ma-worker-status {
+    color: var(--primary);
+}
+
+.ma-worker-result {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border-light);
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    max-height: 200px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: rgba(0, 0, 0, 0.02);
+}
+
+/* Multi-Agent 任务列表项 */
+.ma-task-item .plan-num {
+    font-size: 16px;
+    width: auto;
+    min-width: 24px;
+    text-align: center;
+}
+
+.ma-task-item.done .plan-text {
+    opacity: 0.7;
+}
+
+/* Multi-Agent 模式按钮高亮 */
+.mode-toggle-btn[data-mode="multi-agent"] {
+    color: var(--primary);
+    background: var(--primary-light);
+}

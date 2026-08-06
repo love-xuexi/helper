@@ -10,6 +10,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.models.aiops import AIOpsRequest
 from app.services.aiops_service import aiops_service
+from app.services.multi_agent_service import multi_agent_service
 
 router = APIRouter()
 
@@ -124,20 +125,31 @@ async def diagnose_stream(request: AIOpsRequest):
     """
     session_id = request.session_id or "default"
     task = (request.task or "").strip()
+    use_multi_agent = request.multi_agent
     logger.info(
-        f"[会话 {session_id}] 收到 AIOps 请求（流式），task={'自定义任务' if task else '默认诊断'}"
+        f"[会话 {session_id}] 收到 AIOps 请求（流式），"
+        f"task={'自定义任务' if task else '默认诊断'}，"
+        f"mode={'多Agent' if use_multi_agent else '单Agent'}"
     )
 
     async def event_generator():
         try:
-            if task:
-                # 自定义任务：直接由 Agent 执行用户输入
+            if use_multi_agent:
+                # 多 Agent 协作模式：直接由 multi_agent_service 执行用户任务
+                async for event in multi_agent_service.execute(
+                    task or "分析当前系统告警并生成诊断报告", session_id=session_id
+                ):
+                    yield {"event": "message", "data": json.dumps(event, ensure_ascii=False)}
+                    if event.get("type") in ["complete", "error"]:
+                        break
+            elif task:
+                # 单 Agent 模式：自定义任务
                 async for event in aiops_service.execute(task, session_id=session_id):
                     yield {"event": "message", "data": json.dumps(event, ensure_ascii=False)}
                     if event.get("type") in ["complete", "error"]:
                         break
             else:
-                # 默认诊断：走告警诊断流程
+                # 单 Agent 模式：默认诊断
                 async for event in aiops_service.diagnose(session_id=session_id):
                     yield {"event": "message", "data": json.dumps(event, ensure_ascii=False)}
                     if event.get("type") in ["complete", "error"]:

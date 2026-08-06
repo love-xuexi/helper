@@ -14,6 +14,7 @@ class SmartQAApp {
         this.apiBaseUrl = '/api';
         this.currentMode = 'stream'; // 'quick' 或 'stream'
         this.agentMode = false; // false=Chat 模式（RAG 问答），true=Agent 模式（AIOps Plan-Execute-Replan）
+        this.mode = 'chat'; // 'chat' | 'agent' | 'multi-agent'
         this.sessionId = this.generateSessionId();
         this.isStreaming = false;
         this.currentChatHistory = [];
@@ -710,8 +711,13 @@ class SmartQAApp {
                 agentData: msg.agentData,
             }));
             messagesToLoad.forEach(msg => {
-                if (msg.isAgent) {
-                    this.addAgentMessageFromHistory(msg.agentData, msg.timestamp);
+                if (msg.isAgent && msg.agentData) {
+                    // 检查是多 Agent 还是单 Agent
+                    if (msg.agentData.type === 'multi_agent') {
+                        this.addMultiAgentMessageFromHistory(msg.agentData, msg.timestamp);
+                    } else {
+                        this.addAgentMessageFromHistory(msg.agentData, msg.timestamp);
+                    }
                 } else {
                     const options = msg.type === 'assistant' ? {
                         messageId: msg.messageId,
@@ -789,7 +795,9 @@ class SmartQAApp {
         this.updateUI();
 
         try {
-            if (this.agentMode) {
+            if (this.mode === 'multi-agent') {
+                await this.sendMultiAgentMessage(message);
+            } else if (this.mode === 'agent' || this.agentMode) {
                 await this.sendAgentMessage(message);
             } else {
                 // 默认使用流式模式
@@ -815,28 +823,435 @@ class SmartQAApp {
     // ==================== Agent 模式（AIOps Plan-Execute-Replan） ====================
 
     toggleAgentMode() {
-        this.agentMode = !this.agentMode;
+        // 三态循环：chat → agent → multi-agent → chat
+        const cycle = ['chat', 'agent', 'multi-agent'];
+        const idx = cycle.indexOf(this.mode);
+        this.mode = cycle[(idx + 1) % cycle.length];
+        // 兼容旧逻辑
+        this.agentMode = this.mode === 'agent' || this.mode === 'multi-agent';
+
         if (this.modeToggleBtn) {
-            this.modeToggleBtn.dataset.mode = this.agentMode ? 'agent' : 'chat';
+            this.modeToggleBtn.dataset.mode = this.mode;
         }
         if (this.modeLabel) {
-            this.modeLabel.textContent = this.agentMode ? 'Agent' : 'Chat';
+            const labels = { chat: 'Chat', agent: 'Agent', 'multi-agent': 'Multi' };
+            this.modeLabel.textContent = labels[this.mode] || 'Chat';
         }
         // 切换图标显示
         const chatIcon = document.querySelector('.mode-icon-chat');
         const agentIcon = document.querySelector('.mode-icon-agent');
-        if (chatIcon) chatIcon.style.display = this.agentMode ? 'none' : '';
-        if (agentIcon) agentIcon.style.display = this.agentMode ? '' : 'none';
+        const multiIcon = document.querySelector('.mode-icon-multi');
+        if (chatIcon) chatIcon.style.display = this.mode === 'chat' ? '' : 'none';
+        if (agentIcon) agentIcon.style.display = this.mode === 'agent' ? '' : 'none';
+        if (multiIcon) multiIcon.style.display = this.mode === 'multi-agent' ? '' : 'none';
         // 更新输入框占位符
         if (this.messageInput) {
-            this.messageInput.placeholder = this.agentMode
-                ? '描述一个任务，Agent 会自动规划并调用工具执行…'
-                : '输入您的问题...';
+            const placeholders = {
+                chat: '输入您的问题...',
+                agent: '描述一个任务，Agent 会自动规划并调用工具执行…',
+                'multi-agent': '描述一个任务，多个 Agent 协作完成（Supervisor-Worker）…',
+            };
+            this.messageInput.placeholder = placeholders[this.mode] || '输入您的问题...';
         }
-        this.showNotification(
-            this.agentMode ? '已切换到 Agent 模式（AIOps）' : '已切换到 Chat 模式（RAG 问答）',
-            'info'
-        );
+        const notifMsgs = {
+            chat: '已切换到 Chat 模式（RAG 问答）',
+            agent: '已切换到 Agent 模式（单 Agent Plan-Execute-Replan）',
+            'multi-agent': '已切换到 Multi-Agent 模式（多 Agent 协作）',
+        };
+        this.showNotification(notifMsgs[this.mode] || '', 'info');
+    }
+
+    // ==================== Multi-Agent 模式（Supervisor-Worker 协作） ====================
+
+    async sendMultiAgentMessage(task) {
+        this.abortController = new AbortController();
+
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/aiops`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_id: this.sessionId,
+                    task: task,
+                    multi_agent: true,
+                }),
+                signal: this.abortController.signal,
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP错误: ${response.status}`);
+            }
+
+            // 创建 assistant 消息容器（含多 Agent 执行流程区域）
+            const assistantMessageElement = this.addMessage('assistant', '', true);
+            const flowContainer = this.createMultiAgentFlowContainer(task);
+            const messageContentWrapper = assistantMessageElement.querySelector('.message-content-wrapper');
+            if (messageContentWrapper) {
+                messageContentWrapper.appendChild(flowContainer);
+            }
+
+            // 状态追踪
+            const flowState = {
+                routes: [],
+                workerCards: {},
+                report: '',
+                startTime: Date.now(),
+            };
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (line.trim() === '') continue;
+                        if (line.startsWith('id:') || line.startsWith('event:')) continue;
+                        if (!line.startsWith('data:')) continue;
+
+                        const rawData = line.substring(5).trim();
+                        if (rawData === '[DONE]') continue;
+
+                        try {
+                            const evt = JSON.parse(rawData);
+                            this.handleMultiAgentEvent(evt, flowContainer, flowState);
+                            if (evt.type === 'complete' || evt.type === 'error') {
+                                this.finalizeMultiAgentFlow(assistantMessageElement, flowContainer, flowState);
+                                return;
+                            }
+                        } catch (e) {
+                            console.log('Multi-Agent SSE JSON 解析失败:', e.message);
+                        }
+                    }
+                }
+                this.finalizeMultiAgentFlow(assistantMessageElement, flowContainer, flowState);
+            } catch (err) {
+                if (err.name === 'AbortError') {
+                    this.finalizeMultiAgentFlow(assistantMessageElement, flowContainer, flowState);
+                } else {
+                    throw err;
+                }
+            }
+
+            // 保存到 localStorage
+            const agentData = {
+                type: 'multi_agent',
+                task: task,
+                routes: flowState.routes,
+                report: flowState.report,
+            };
+            this.currentChatHistory.push({
+                role: 'user',
+                content: task,
+                timestamp: new Date().toISOString(),
+            });
+            this.currentChatHistory.push({
+                role: 'assistant',
+                content: flowState.report || '(执行完成)',
+                isAgent: true,
+                agentData: agentData,
+                timestamp: new Date().toISOString(),
+            });
+        } catch (error) {
+            console.error('Multi-Agent 请求失败:', error);
+            this.addMessage('assistant', '抱歉，Multi-Agent 执行时出现错误：' + error.message);
+        }
+    }
+
+    createMultiAgentFlowContainer(task) {
+        const container = document.createElement('div');
+        container.className = 'agent-flow ma-flow';
+
+        // === 可折叠的执行流程区域 ===
+        const flowWrapper = document.createElement('div');
+        flowWrapper.className = 'agent-flow-wrapper ma-flow-wrapper';
+
+        // 折叠头
+        const flowHeader = document.createElement('div');
+        flowHeader.className = 'agent-flow-header ma-flow-header';
+        flowHeader.innerHTML = `
+            <svg class="agent-flow-chevron" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <svg class="agent-spinner" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2V6M12 18V22M4.93 4.93L7.76 7.76M16.24 16.24L19.07 19.07M2 12H6M18 12H22M4.93 19.07L7.76 16.24M16.24 7.76L19.07 4.93" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <span class="agent-flow-title">🤖 多 Agent 协作流程</span>
+            <span class="agent-flow-status">调度中…</span>
+        `;
+        flowWrapper.appendChild(flowHeader);
+
+        // 折叠内容区
+        const flowBody = document.createElement('div');
+        flowBody.className = 'agent-flow-body';
+
+        // 任务区域
+        const taskDiv = document.createElement('div');
+        taskDiv.className = 'agent-plan ma-task';
+        taskDiv.innerHTML = `
+            <div class="agent-section-header"><span>📋 任务分解</span></div>
+            <div class="agent-plan-list ma-task-list"><div class="agent-plan-placeholder">等待 Supervisor 分解…</div></div>
+        `;
+        flowBody.appendChild(taskDiv);
+
+        // Worker 执行区域
+        const workersDiv = document.createElement('div');
+        workersDiv.className = 'agent-steps ma-workers';
+        flowBody.appendChild(workersDiv);
+
+        flowWrapper.appendChild(flowBody);
+        container.appendChild(flowWrapper);
+
+        // === 最终报告区域（在折叠块外面，始终可见）===
+        const reportDiv = document.createElement('div');
+        reportDiv.className = 'agent-report ma-report';
+        container.appendChild(reportDiv);
+
+        // 绑定折叠/展开
+        flowHeader.addEventListener('click', () => {
+            flowWrapper.classList.toggle('collapsed');
+        });
+
+        return container;
+    }
+
+    handleMultiAgentEvent(evt, container, flowState) {
+        const statusSpan = container.querySelector('.agent-flow-status');
+        const taskList = container.querySelector('.ma-task-list');
+
+        if (evt.type === 'start') {
+            if (statusSpan) statusSpan.textContent = 'Supervisor 分析任务中…';
+        } else if (evt.type === 'supervisor_route') {
+            // Supervisor 决定路由到某个 Worker
+            const route = {
+                worker: evt.next_worker || '',
+                workerName: evt.worker_name || evt.next_worker || '',
+                workerEmoji: evt.worker_emoji || '🤖',
+                subtask: evt.subtask || '',
+                message: evt.message || '',
+            };
+            flowState.routes.push(route);
+
+            // 更新任务列表
+            if (taskList) {
+                const placeholder = taskList.querySelector('.agent-plan-placeholder');
+                if (placeholder) placeholder.remove();
+                const item = document.createElement('div');
+                item.className = 'agent-plan-item ma-task-item';
+                item.innerHTML = `
+                    <span class="plan-num">${route.workerEmoji}</span>
+                    <span class="plan-text"><strong>${route.workerName}</strong>: ${this.escapeHtml(route.subtask)}</span>
+                `;
+                taskList.appendChild(item);
+            }
+
+            // 创建 Worker 卡片
+            this.createWorkerCard(container, route);
+
+            if (statusSpan) {
+                statusSpan.textContent = `${route.workerEmoji} ${route.workerName} 执行中…`;
+            }
+        } else if (evt.type === 'supervisor_finish') {
+            if (statusSpan) statusSpan.textContent = '生成最终报告中…';
+        } else if (evt.type === 'worker_complete') {
+            const worker = evt.worker || '';
+            const card = flowState.workerCards[worker];
+            if (card) {
+                // 标记完成
+                card.classList.add('done');
+                const resultDiv = card.querySelector('.ma-worker-result');
+                if (resultDiv) {
+                    const preview = evt.result_preview || evt.result || '';
+                    resultDiv.innerHTML = this.escapeHtml(preview);
+                    resultDiv.style.display = '';
+                }
+                const statusBadge = card.querySelector('.ma-worker-status');
+                if (statusBadge) statusBadge.textContent = '✅ 完成';
+            }
+            if (statusSpan) {
+                statusSpan.textContent = `${evt.worker_emoji || ''} ${evt.worker_name || worker} 完成`;
+            }
+        } else if (evt.type === 'report') {
+            flowState.report = evt.report || '';
+            if (statusSpan) statusSpan.textContent = '报告已生成';
+        } else if (evt.type === 'complete') {
+            if (!flowState.report && evt.response) {
+                flowState.report = evt.response;
+            }
+        } else if (evt.type === 'error') {
+            flowState.error = evt.message || '执行出错';
+        }
+    }
+
+    createWorkerCard(container, route) {
+        const workersDiv = container.querySelector('.ma-workers');
+        if (!workersDiv) return;
+
+        const card = document.createElement('div');
+        card.className = `ma-worker-card ${route.worker}`;
+        card.dataset.worker = route.worker;
+        card.innerHTML = `
+            <div class="ma-worker-header">
+                <span class="ma-worker-emoji">${route.workerEmoji}</span>
+                <span class="ma-worker-name">${route.workerName}</span>
+                <span class="ma-worker-subtask">${this.escapeHtml(route.subtask)}</span>
+                <span class="ma-worker-status">执行中…</span>
+            </div>
+            <div class="ma-worker-result" style="display:none;"></div>
+        `;
+        workersDiv.appendChild(card);
+
+        // 缓存卡片引用
+        if (!container._flowState) container._flowState = {};
+        const flowState = container._flowState;
+        if (!flowState.workerCards) flowState.workerCards = {};
+        // Also update the passed flowState
+        const parent = container.closest('.agent-flow');
+        // Actually we need to pass flowState differently - let's use dataset
+        card.dataset.workerKey = route.worker;
+
+        // Store reference on the container itself
+        if (!container._workerCards) container._workerCards = {};
+        container._workerCards[route.worker] = card;
+
+        this.scrollToBottom();
+    }
+
+    finalizeMultiAgentFlow(messageElement, container, flowState) {
+        // 更新 flowState.workerCards from container._workerCards
+        if (container._workerCards) {
+            flowState.workerCards = container._workerCards;
+        }
+
+        // 移除 streaming 类，停止闪烁光标
+        if (messageElement) {
+            messageElement.classList.remove('streaming');
+        }
+
+        // 隐藏 spinner
+        const spinner = container.querySelector('.agent-spinner');
+        if (spinner) spinner.style.display = 'none';
+
+        // 更新折叠头状态文字
+        const statusSpan = container.querySelector('.agent-flow-status');
+        if (statusSpan) {
+            const total = flowState.routes.length;
+            if (flowState.error) {
+                statusSpan.textContent = `执行失败（${total} 轮）`;
+            } else {
+                statusSpan.textContent = `协作完成（${total} 轮 Worker 调用）`;
+            }
+        }
+
+        // 渲染最终报告
+        const reportDiv = container.querySelector('.ma-report');
+        if (reportDiv) {
+            if (flowState.error) {
+                reportDiv.innerHTML = `
+                    <div class="agent-report-header error">❌ 执行失败</div>
+                    <div class="agent-report-body">${this.escapeHtml(flowState.error)}</div>
+                `;
+                reportDiv.classList.add('has-error');
+            } else if (flowState.report) {
+                reportDiv.innerHTML = `
+                    <div class="agent-report-header">📄 诊断报告</div>
+                    <div class="agent-report-body">${this.renderMarkdown(flowState.report)}</div>
+                `;
+            } else {
+                reportDiv.innerHTML = '<div class="agent-report-body">未生成报告</div>';
+            }
+        }
+
+        // 自动折叠流程区域（成功时）
+        const flowWrapper = container.querySelector('.ma-flow-wrapper');
+        if (flowWrapper && !flowState.error) {
+            setTimeout(() => {
+                flowWrapper.classList.add('collapsed');
+            }, 800);
+        }
+
+        this.scrollToBottom();
+    }
+
+    addMultiAgentMessageFromHistory(agentData, timestamp) {
+        if (!agentData || agentData.type !== 'multi_agent') return;
+
+        const task = agentData.task || '';
+        const report = agentData.report || '';
+        const routes = agentData.routes || [];
+
+        // 添加用户消息
+        this.addMessage('user', task, false, timestamp);
+
+        // 创建 assistant 消息（含流程区域）
+        const assistantMessageElement = this.addMessage('assistant', '', true);
+        const flowContainer = this.createMultiAgentFlowContainer(task);
+        const messageContentWrapper = assistantMessageElement.querySelector('.message-content-wrapper');
+        if (messageContentWrapper) {
+            messageContentWrapper.appendChild(flowContainer);
+        }
+
+        // 还原流程
+        const flowState = { routes: routes, workerCards: {}, report: report };
+
+        // 渲染任务列表
+        const taskList = flowContainer.querySelector('.ma-task-list');
+        if (taskList) {
+            const placeholder = taskList.querySelector('.agent-plan-placeholder');
+            if (placeholder) placeholder.remove();
+            routes.forEach((r) => {
+                const item = document.createElement('div');
+                item.className = 'agent-plan-item ma-task-item done';
+                item.innerHTML = `
+                    <span class="plan-num">${r.workerEmoji || '🤖'}</span>
+                    <span class="plan-text"><strong>${r.workerName || r.worker}</strong>: ${this.escapeHtml(r.subtask || '')}</span>
+                `;
+                taskList.appendChild(item);
+            });
+        }
+
+        // 渲染 Worker 卡片
+        const workersDiv = flowContainer.querySelector('.ma-workers');
+        routes.forEach((r) => {
+            const card = document.createElement('div');
+            card.className = `ma-worker-card ${r.worker} done`;
+            card.innerHTML = `
+                <div class="ma-worker-header">
+                    <span class="ma-worker-emoji">${r.workerEmoji || '🤖'}</span>
+                    <span class="ma-worker-name">${r.workerName || r.worker}</span>
+                    <span class="ma-worker-subtask">${this.escapeHtml(r.subtask || '')}</span>
+                    <span class="ma-worker-status">✅ 完成</span>
+                </div>
+            `;
+            if (workersDiv) workersDiv.appendChild(card);
+        });
+
+        // 渲染报告
+        const reportDiv = flowContainer.querySelector('.ma-report');
+        if (reportDiv && report) {
+            reportDiv.innerHTML = `
+                <div class="agent-report-header">📄 诊断报告</div>
+                <div class="agent-report-body">${this.renderMarkdown(report)}</div>
+            `;
+        }
+
+        // 自动折叠
+        const flowWrapper = flowContainer.querySelector('.ma-flow-wrapper');
+        if (flowWrapper) {
+            flowWrapper.classList.add('collapsed');
+        }
+
+        // 移除 streaming 类
+        if (assistantMessageElement) {
+            assistantMessageElement.classList.remove('streaming');
+        }
     }
 
     async sendAgentMessage(task) {

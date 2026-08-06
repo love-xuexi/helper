@@ -17,6 +17,11 @@ class AIOpsRequest(BaseModel):
         description="自定义任务描述。留空时走默认告警诊断流程；有值时由 Agent 按该任务执行 Plan-Execute-Replan。",
     )
 
+    multi_agent: bool = Field(
+        default=False,
+        description="是否使用多 Agent 协作模式（Supervisor-Worker）。True 时走多 Agent 流程，False 时走单 Agent Plan-Execute-Replan。",
+    )
+
     class Config:
         json_schema_extra = {
             "example": {
