@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>智能问答助手</title>
-    <link rel="stylesheet" href="/static/styles.css?v=7">
+    <link rel="stylesheet" href="/static/styles.css?v=10">
     <!-- Markdown 渲染库 -->
     <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
     <!-- 代码高亮库 -->
@@ -131,6 +131,18 @@
                                             <span>上报Bug</span>
                                         </div>
                                     </div>
+                                </div>
+                                <div class="mode-switch-wrapper">
+                                    <button class="mode-toggle-btn" id="modeToggleBtn" title="切换 Chat / Agent 模式" data-mode="chat">
+                                        <svg class="mode-icon-chat" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                            <path d="M21 11.5C21 16.7467 16.7467 21 11.5 21C10.2638 21 9.06833 20.7583 7.975 20.3175L3 21L3.6825 16.025C3.24167 14.9317 3 13.7362 3 12.5C3 7.25333 7.25333 3 12.5 3C17.7467 3 22 7.25333 22 12.5L21 11.5Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                        </svg>
+                                        <svg class="mode-icon-agent" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:none;">
+                                            <path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                            <path d="M19 14L20 17L23 18L20 19L19 22L18 19L15 18L18 17L19 14Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                        </svg>
+                                        <span class="mode-label" id="modeLabel">Chat</span>
+                                    </button>
                                 </div>
                                 <div class="right-actions">
                                     <button class="stop-btn" id="stopButton" title="停止生成" style="display: none;">
@@ -293,6 +305,6 @@
     <!-- 通知容器 -->
     <div id="notificationContainer" class="notification-container"></div>
 
-    <script src="/static/app.js?v=7"></script>
+    <script src="/static/app.js?v=10"></script>
 </body>
 </html>

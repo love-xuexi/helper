@@ -13,6 +13,7 @@ class SmartQAApp {
     constructor() {
         this.apiBaseUrl = '/api';
         this.currentMode = 'stream'; // 'quick' 或 'stream'
+        this.agentMode = false; // false=Chat 模式（RAG 问答），true=Agent 模式（AIOps Plan-Execute-Replan）
         this.sessionId = this.generateSessionId();
         this.isStreaming = false;
         this.currentChatHistory = [];
@@ -126,6 +127,10 @@ class SmartQAApp {
         this.kbManageMenuItem = document.getElementById('kbManageMenuItem');
         this.fileInput = document.getElementById('fileInput');
 
+        // 模式切换按钮
+        this.modeToggleBtn = document.getElementById('modeToggleBtn');
+        this.modeLabel = document.getElementById('modeLabel');
+
         this.chatMessages = document.getElementById('chatMessages');
         this.loadingOverlay = document.getElementById('loadingOverlay');
         this.chatContainer = document.querySelector('.chat-container');
@@ -225,6 +230,11 @@ class SmartQAApp {
         // 停止生成
         if (this.stopButton) {
             this.stopButton.addEventListener('click', () => this.stopGeneration());
+        }
+
+        // 模式切换（Chat / Agent）
+        if (this.modeToggleBtn) {
+            this.modeToggleBtn.addEventListener('click', () => this.toggleAgentMode());
         }
 
         // 工具菜单
@@ -750,8 +760,12 @@ class SmartQAApp {
         this.updateUI();
 
         try {
-            // 默认使用流式模式
-            await this.sendStreamMessage(message);
+            if (this.agentMode) {
+                await this.sendAgentMessage(message);
+            } else {
+                // 默认使用流式模式
+                await this.sendStreamMessage(message);
+            }
         } catch (error) {
             console.error('发送消息失败:', error);
             this.addMessage('assistant', '抱歉，发送消息时出现错误：' + error.message);
@@ -767,6 +781,302 @@ class SmartQAApp {
                 this.renderChatHistory();
             }
         }
+    }
+
+    // ==================== Agent 模式（AIOps Plan-Execute-Replan） ====================
+
+    toggleAgentMode() {
+        this.agentMode = !this.agentMode;
+        if (this.modeToggleBtn) {
+            this.modeToggleBtn.dataset.mode = this.agentMode ? 'agent' : 'chat';
+        }
+        if (this.modeLabel) {
+            this.modeLabel.textContent = this.agentMode ? 'Agent' : 'Chat';
+        }
+        // 切换图标显示
+        const chatIcon = document.querySelector('.mode-icon-chat');
+        const agentIcon = document.querySelector('.mode-icon-agent');
+        if (chatIcon) chatIcon.style.display = this.agentMode ? 'none' : '';
+        if (agentIcon) agentIcon.style.display = this.agentMode ? '' : 'none';
+        // 更新输入框占位符
+        if (this.messageInput) {
+            this.messageInput.placeholder = this.agentMode
+                ? '描述一个任务，Agent 会自动规划并调用工具执行…'
+                : '输入您的问题...';
+        }
+        this.showNotification(
+            this.agentMode ? '已切换到 Agent 模式（AIOps）' : '已切换到 Chat 模式（RAG 问答）',
+            'info'
+        );
+    }
+
+    async sendAgentMessage(task) {
+        this.abortController = new AbortController();
+
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/aiops`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: this.sessionId, task: task }),
+                signal: this.abortController.signal,
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP错误: ${response.status}`);
+            }
+
+            // 创建 assistant 消息容器（含 Agent 执行流程区域）
+            const assistantMessageElement = this.addMessage('assistant', '', true);
+            const flowContainer = this.createAgentFlowContainer(task);
+            const messageContentWrapper = assistantMessageElement.querySelector('.message-content-wrapper');
+            if (messageContentWrapper) {
+                messageContentWrapper.appendChild(flowContainer);
+            }
+
+            // 状态追踪
+            const flowState = { plan: [], completedSteps: [], report: '', startTime: Date.now() };
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (line.trim() === '') continue;
+                        if (line.startsWith('id:') || line.startsWith('event:')) continue;
+                        if (!line.startsWith('data:')) continue;
+
+                        const rawData = line.substring(5).trim();
+                        if (rawData === '[DONE]') continue;
+
+                        try {
+                            const evt = JSON.parse(rawData);
+                            this.handleAgentEvent(evt, flowContainer, flowState);
+                            if (evt.type === 'complete' || evt.type === 'error') {
+                                this.finalizeAgentFlow(assistantMessageElement, flowContainer, flowState);
+                                return;
+                            }
+                        } catch (e) {
+                            console.log('Agent SSE JSON 解析失败:', e.message);
+                        }
+                    }
+                }
+                this.finalizeAgentFlow(assistantMessageElement, flowContainer, flowState);
+            } catch (err) {
+                if (err.name === 'AbortError') {
+                    this.finalizeAgentFlow(assistantMessageElement, flowContainer, flowState);
+                } else {
+                    throw err;
+                }
+            }
+        } catch (error) {
+            console.error('Agent 模式发送失败:', error);
+            this.addMessage('assistant', '抱歉，Agent 执行时出现错误：' + error.message);
+        }
+    }
+
+    createAgentFlowContainer(task) {
+        const container = document.createElement('div');
+        container.className = 'agent-flow';
+
+        // === 可折叠的执行流程区域（DeepSeek 风格）===
+        const flowWrapper = document.createElement('div');
+        flowWrapper.className = 'agent-flow-wrapper';
+
+        // 折叠头
+        const flowHeader = document.createElement('div');
+        flowHeader.className = 'agent-flow-header';
+        flowHeader.innerHTML = `
+            <svg class="agent-flow-chevron" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <svg class="agent-spinner" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2V6M12 18V22M4.93 4.93L7.76 7.76M16.24 16.24L19.07 19.07M2 12H6M18 12H22M4.93 19.07L7.76 16.24M16.24 7.76L19.07 4.93" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <span class="agent-flow-title">Agent 执行流程</span>
+            <span class="agent-flow-status">规划中…</span>
+        `;
+        flowWrapper.appendChild(flowHeader);
+
+        // 折叠内容区
+        const flowBody = document.createElement('div');
+        flowBody.className = 'agent-flow-body';
+
+        // 计划区域
+        const planDiv = document.createElement('div');
+        planDiv.className = 'agent-plan';
+        planDiv.innerHTML = `
+            <div class="agent-section-header"><span>📋 执行计划</span></div>
+            <div class="agent-plan-list"><div class="agent-plan-placeholder">等待规划…</div></div>
+        `;
+        flowBody.appendChild(planDiv);
+
+        // 步骤执行区域
+        const stepsDiv = document.createElement('div');
+        stepsDiv.className = 'agent-steps';
+        flowBody.appendChild(stepsDiv);
+
+        flowWrapper.appendChild(flowBody);
+        container.appendChild(flowWrapper);
+
+        // === 最终报告区域（在折叠块外面，始终可见）===
+        const reportDiv = document.createElement('div');
+        reportDiv.className = 'agent-report';
+        container.appendChild(reportDiv);
+
+        // 绑定折叠/展开
+        flowHeader.addEventListener('click', () => {
+            flowWrapper.classList.toggle('collapsed');
+        });
+
+        return container;
+    }
+
+    handleAgentEvent(evt, container, flowState) {
+        const statusSpan = container.querySelector('.agent-flow-status');
+
+        if (evt.type === 'plan') {
+            flowState.plan = evt.plan || [];
+            const list = container.querySelector('.agent-plan-list');
+            if (list) {
+                if (flowState.plan.length === 0) {
+                    list.innerHTML = '<div class="agent-plan-placeholder">等待规划…</div>';
+                } else {
+                    list.innerHTML = flowState.plan
+                        .map(
+                            (step, i) =>
+                                `<div class="agent-plan-item" data-step="${i}"><span class="plan-num">${i + 1}</span><span class="plan-text">${this.escapeHtml(step)}</span></div>`
+                        )
+                        .join('');
+                }
+            }
+            if (statusSpan) statusSpan.textContent = `计划已生成（${flowState.plan.length} 步），执行中…`;
+        } else if (evt.type === 'step_complete') {
+            const completedStep = {
+                step: evt.current_step || '',
+                resultPreview: evt.result_preview || '',
+                remaining: evt.remaining_steps || 0,
+                index: flowState.completedSteps.length,
+            };
+            flowState.completedSteps.push(completedStep);
+            this.renderAgentStep(container, completedStep);
+
+            // 更新计划列表中的已完成状态
+            const planItems = container.querySelectorAll('.agent-plan-item');
+            if (planItems[completedStep.index]) {
+                planItems[completedStep.index].classList.add('done');
+            }
+            if (statusSpan) {
+                statusSpan.textContent = `执行中（${flowState.completedSteps.length}/${flowState.plan.length}）`;
+            }
+        } else if (evt.type === 'report') {
+            flowState.report = evt.report || '';
+            if (statusSpan) statusSpan.textContent = '生成报告中…';
+        } else if (evt.type === 'complete') {
+            if (!flowState.report && evt.response) {
+                flowState.report = evt.response;
+            }
+        } else if (evt.type === 'error') {
+            flowState.error = evt.message || '执行出错';
+        } else if (evt.type === 'status') {
+            if (evt.stage === 'replanner' && evt.message && statusSpan) {
+                statusSpan.textContent = evt.message;
+            }
+        }
+    }
+
+    renderAgentStep(container, completedStep) {
+        const stepsDiv = container.querySelector('.agent-steps');
+        if (!stepsDiv) return;
+
+        const stepDiv = document.createElement('div');
+        stepDiv.className = 'agent-step done';
+
+        const hasResult = completedStep.resultPreview && completedStep.resultPreview.trim();
+        stepDiv.innerHTML = `
+            <div class="agent-step-header">
+                <span class="agent-step-icon">✅</span>
+                <span class="agent-step-title">步骤 ${completedStep.index + 1}</span>
+                <span class="agent-step-detail">${this.escapeHtml(completedStep.step)}</span>
+            </div>
+            ${hasResult ? `<div class="agent-step-result">${this.escapeHtml(completedStep.resultPreview)}</div>` : ''}
+        `;
+        stepsDiv.appendChild(stepDiv);
+        this.scrollToBottom();
+    }
+
+    finalizeAgentFlow(messageElement, container, flowState) {
+        // 移除 streaming 类，停止闪烁光标
+        if (messageElement) {
+            messageElement.classList.remove('streaming');
+        }
+
+        // 隐藏 spinner
+        const spinner = container.querySelector('.agent-spinner');
+        if (spinner) spinner.style.display = 'none';
+
+        // 更新折叠头状态文字
+        const statusSpan = container.querySelector('.agent-flow-status');
+        if (statusSpan) {
+            const total = flowState.plan.length;
+            const done = flowState.completedSteps.length;
+            if (flowState.error) {
+                statusSpan.textContent = `执行失败（${done}/${total} 步）`;
+            } else if (done < total) {
+                statusSpan.textContent = `已结束（${done}/${total} 步完成）`;
+            } else {
+                statusSpan.textContent = `执行完成（${done}/${total} 步）`;
+            }
+        }
+
+        // 标记未执行的步骤为"未执行"
+        const planItems = container.querySelectorAll('.agent-plan-item');
+        planItems.forEach((item, i) => {
+            if (!item.classList.contains('done')) {
+                item.classList.add('skipped');
+            }
+        });
+
+        // 更新计划 header
+        const planHeader = container.querySelector('.agent-plan .agent-section-header span');
+        if (planHeader && flowState.plan.length > 0) {
+            planHeader.textContent = `📋 执行计划（${flowState.plan.length} 步，完成 ${flowState.completedSteps.length}）`;
+        }
+
+        // 渲染最终报告
+        const reportDiv = container.querySelector('.agent-report');
+        if (reportDiv) {
+            if (flowState.error) {
+                reportDiv.innerHTML = `
+                    <div class="agent-report-header error">❌ 执行失败</div>
+                    <div class="agent-report-body">${this.escapeHtml(flowState.error)}</div>
+                `;
+                reportDiv.classList.add('has-error');
+            } else if (flowState.report) {
+                reportDiv.innerHTML = `
+                    <div class="agent-report-header">📄 最终报告</div>
+                    <div class="agent-report-body markdown-body">${this.renderMarkdown(flowState.report)}</div>
+                `;
+                this.highlightCodeBlocks(reportDiv);
+            }
+        }
+
+        // 执行完成后自动折叠流程区域（保留报告可见）
+        const flowWrapper = container.querySelector('.agent-flow-wrapper');
+        if (flowWrapper && !flowState.error) {
+            // 成功时自动折叠，让用户聚焦报告；失败时保持展开方便排查
+            flowWrapper.classList.add('collapsed');
+        }
+
+        this.scrollToBottom();
     }
 
     async sendStreamMessage(message) {

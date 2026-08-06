@@ -370,12 +370,14 @@ class AIOpsService:
         past_steps = state.get("past_steps", [])
 
         if past_steps:
-            last_step, _ = past_steps[-1]
+            last_step, result = past_steps[-1]
+            result_preview = (result[:300] + "...") if len(result) > 300 else result
             return {
                 "type": "step_complete",
                 "stage": "step_executed",
                 "message": f"步骤执行完成 ({len(past_steps)}/{len(past_steps) + len(plan)})",
                 "current_step": last_step,
+                "result_preview": result_preview,
                 "remaining_steps": len(plan),
             }
         else:

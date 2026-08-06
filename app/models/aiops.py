@@ -12,8 +12,18 @@ class AIOpsRequest(BaseModel):
 
     session_id: str | None = Field(default="default", description="会话ID，用于追踪诊断历史")
 
+    task: str | None = Field(
+        default=None,
+        description="自定义任务描述。留空时走默认告警诊断流程；有值时由 Agent 按该任务执行 Plan-Execute-Replan。",
+    )
+
     class Config:
-        json_schema_extra = {"example": {"session_id": "session-123"}}
+        json_schema_extra = {
+            "example": {
+                "session_id": "session-123",
+                "task": "分析当前系统的 CPU 使用情况并给出优化建议",
+            }
+        }
 
 
 class AlertInfo(BaseModel):

@@ -123,19 +123,27 @@ async def diagnose_stream(request: AIOpsRequest):
         SSE 事件流
     """
     session_id = request.session_id or "default"
-    logger.info(f"[会话 {session_id}] 收到 AIOps 诊断请求（流式）")
+    task = (request.task or "").strip()
+    logger.info(
+        f"[会话 {session_id}] 收到 AIOps 请求（流式），task={'自定义任务' if task else '默认诊断'}"
+    )
 
     async def event_generator():
         try:
-            async for event in aiops_service.diagnose(session_id=session_id):
-                # 发送事件
-                yield {"event": "message", "data": json.dumps(event, ensure_ascii=False)}
+            if task:
+                # 自定义任务：直接由 Agent 执行用户输入
+                async for event in aiops_service.execute(task, session_id=session_id):
+                    yield {"event": "message", "data": json.dumps(event, ensure_ascii=False)}
+                    if event.get("type") in ["complete", "error"]:
+                        break
+            else:
+                # 默认诊断：走告警诊断流程
+                async for event in aiops_service.diagnose(session_id=session_id):
+                    yield {"event": "message", "data": json.dumps(event, ensure_ascii=False)}
+                    if event.get("type") in ["complete", "error"]:
+                        break
 
-                # 如果是完成或错误事件，结束流
-                if event.get("type") in ["complete", "error"]:
-                    break
-
-            logger.info(f"[会话 {session_id}] AIOps 诊断流式响应完成")
+            logger.info(f"[会话 {session_id}] AIOps 流式响应完成")
 
         except Exception as e:
             logger.error(f"[会话 {session_id}] AIOps 诊断流式响应异常: {e}", exc_info=True)

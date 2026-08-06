@@ -1150,6 +1150,49 @@ body {
     color: var(--text-secondary);
 }
 
+/* 模式切换按钮（Chat / Agent） */
+.mode-switch-wrapper {
+    display: flex;
+    align-items: center;
+}
+
+.mode-toggle-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--bg-sidebar);
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 13px;
+    transition: all 0.15s ease;
+}
+
+.mode-toggle-btn:hover {
+    background: var(--primary-light);
+    color: var(--primary);
+    border-color: var(--primary);
+}
+
+.mode-toggle-btn[data-mode="agent"] {
+    background: var(--primary-light);
+    color: var(--primary);
+    border-color: var(--primary);
+}
+
+.mode-toggle-btn svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+.mode-label {
+    font-weight: 500;
+    white-space: nowrap;
+}
+
 .right-actions {
     display: flex;
     align-items: center;
@@ -1665,4 +1708,339 @@ body {
 @keyframes blink {
     0%, 100% { opacity: 1; }
     50% { opacity: 0; }
+}
+
+/* ============================================================
+   Agent 执行流程可视化（AIOps Plan-Execute-Replan）
+   ============================================================ */
+
+.agent-flow {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 4px 0;
+}
+
+/* === 可折叠的执行流程包装（DeepSeek 风格）=== */
+.agent-flow-wrapper {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.agent-flow-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: var(--bg-sidebar);
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s ease;
+}
+
+.agent-flow-header:hover {
+    background: var(--primary-light);
+}
+
+.agent-flow-chevron {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    color: var(--text-secondary);
+    transition: transform 0.2s ease;
+}
+
+.agent-flow-wrapper.collapsed .agent-flow-chevron {
+    transform: rotate(-90deg);
+}
+
+.agent-spinner {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    animation: agent-spin 1.5s linear infinite;
+    color: var(--primary);
+}
+
+@keyframes agent-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.agent-flow-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.agent-flow-status {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-left: auto;
+}
+
+.agent-flow-body {
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    transition: max-height 0.3s ease, opacity 0.2s ease, padding 0.3s ease;
+    max-height: 3000px;
+    overflow: hidden;
+}
+
+.agent-flow-wrapper.collapsed .agent-flow-body {
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    opacity: 0;
+}
+
+/* 任务描述 */
+.agent-task {
+    background: var(--bg-sidebar);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+}
+
+.agent-task-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+.agent-task-text {
+    font-size: 14px;
+    color: var(--text-primary);
+    line-height: 1.5;
+}
+
+/* 计划区域 */
+.agent-plan {
+    background: var(--bg-sidebar);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+}
+
+.agent-section-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+.agent-plan-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.agent-plan-placeholder {
+    font-size: 12px;
+    color: var(--text-secondary);
+    opacity: 0.6;
+    font-style: italic;
+}
+
+.agent-plan-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    color: var(--text-secondary);
+    transition: all 0.2s ease;
+}
+
+.agent-plan-item .plan-num {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--border-light);
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.agent-plan-item .plan-text {
+    line-height: 1.5;
+    padding-top: 1px;
+}
+
+.agent-plan-item.done {
+    color: var(--primary);
+}
+
+.agent-plan-item.done .plan-num {
+    background: var(--primary);
+    color: white;
+}
+
+.agent-plan-item.done .plan-text {
+    text-decoration: line-through;
+    opacity: 0.7;
+}
+
+/* 未执行的步骤（流程提前结束时） */
+.agent-plan-item.skipped .plan-num {
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--text-secondary);
+}
+
+.agent-plan-item.skipped .plan-text {
+    opacity: 0.4;
+}
+
+.agent-plan-item.skipped::after {
+    content: "未执行";
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-secondary);
+    opacity: 0.5;
+    font-style: italic;
+}
+
+/* 步骤执行区域 */
+.agent-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.agent-step {
+    border: 1px solid var(--border-light);
+    border-left: 3px solid var(--primary);
+    border-radius: var(--radius-sm);
+    padding: 8px 12px;
+    background: var(--bg-sidebar);
+    animation: fadeIn 0.3s ease;
+}
+
+.agent-step-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    font-size: 13px;
+    flex-wrap: wrap;
+}
+
+.agent-step-icon {
+    flex-shrink: 0;
+}
+
+.agent-step-title {
+    font-weight: 600;
+    color: var(--primary);
+    flex-shrink: 0;
+}
+
+.agent-step-detail {
+    color: var(--text-secondary);
+    line-height: 1.5;
+    word-break: break-word;
+}
+
+.agent-step-result {
+    margin-top: 6px;
+    padding: 8px 10px;
+    background: rgba(0,0,0,0.03);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+/* 最终报告区域 */
+.agent-report:empty {
+    display: none;
+}
+
+.agent-report-header {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--primary);
+    margin-bottom: 6px;
+}
+
+.agent-report-header.error {
+    color: var(--danger);
+}
+
+.agent-report-body {
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--text-primary);
+    padding: 16px 20px;
+    background: var(--bg-sidebar);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-light);
+    word-break: break-word;
+    overflow-x: hidden;
+}
+
+.agent-report-body h1,
+.agent-report-body h2,
+.agent-report-body h3 {
+    margin: 12px 0 6px 0;
+}
+
+.agent-report-body table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 8px 0;
+    display: block;
+    overflow-x: auto;
+}
+
+.agent-report-body th,
+.agent-report-body td {
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    text-align: left;
+    font-size: 13px;
+}
+
+.agent-report-body th {
+    background: var(--bg-sidebar);
+    font-weight: 600;
+}
+
+.agent-report-body code {
+    background: rgba(0,0,0,0.06);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.9em;
+}
+
+.agent-report-body pre {
+    overflow-x: auto;
+    margin: 8px 0;
+    border-radius: var(--radius-sm);
+}
+
+.agent-report-body pre code {
+    background: transparent;
+    padding: 0;
+}
+
+.agent-report.has-error .agent-report-body {
+    border-color: var(--danger);
+    color: var(--danger);
 }
