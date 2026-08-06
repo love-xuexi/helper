@@ -2001,6 +2001,46 @@ body {
     margin: 12px 0 6px 0;
 }
 
+.agent-report-body h4,
+.agent-report-body h5,
+.agent-report-body h6 {
+    margin: 10px 0 4px 0;
+}
+
+.agent-report-body p {
+    margin: 8px 0;
+}
+
+.agent-report-body ul,
+.agent-report-body ol {
+    margin: 8px 0;
+    padding-left: 24px;
+}
+
+.agent-report-body li {
+    margin: 4px 0;
+}
+
+.agent-report-body ul ul,
+.agent-report-body ol ol,
+.agent-report-body ul ol,
+.agent-report-body ol ul {
+    margin: 4px 0;
+}
+
+.agent-report-body blockquote {
+    border-left: 3px solid var(--primary);
+    padding-left: 16px;
+    margin: 12px 0;
+    color: var(--text-secondary);
+}
+
+.agent-report-body hr {
+    border: none;
+    border-top: 1px solid var(--border-light);
+    margin: 12px 0;
+}
+
 .agent-report-body table {
     border-collapse: collapse;
     width: 100%;
